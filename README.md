@@ -69,7 +69,7 @@ graph TB
 
 ## Quick Deploy
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/DavidJKTofan/r2-file-sharing-platform)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/DavidJKTofan/cloudflare-file-sharing-platform)
 
 ## Manual Setup
 
@@ -82,7 +82,7 @@ graph TB
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/DavidJKTofan/r2-file-sharing-platform.git
+git clone https://github.com/DavidJKTofan/cloudflare-file-sharing-platform.git
 cd file-sharing-platform
 npm install
 ```
