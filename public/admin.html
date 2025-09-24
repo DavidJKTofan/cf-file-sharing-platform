@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<title>File Admin Dashboard</title>
+		<link href="/tailwind.css" rel="stylesheet" />
+		<script src="https://cdn.jsdelivr.net/npm/tus-js-client@latest/dist/tus.min.js"></script>
+		<style>
+			.hidden {
+				display: none !important;
+			}
+		</style>
+	</head>
+	<body class="bg-gray-100 min-h-screen">
+		<div class="container mx-auto px-4 py-6">
+			<!-- Header with User Info -->
+			<div class="mb-8 bg-white rounded-xl shadow-md p-6">
+				<div class="flex items-center justify-between">
+					<div>
+						<h1 class="text-3xl font-bold text-gray-800 mb-2">Admin Dashboard</h1>
+						<p class="text-gray-600">Role-based file management with Cloudflare Access</p>
+					</div>
+					<div class="text-right">
+						<div id="userInfo" class="bg-blue-50 rounded-lg p-4">
+							<div class="text-sm text-gray-600">Authenticated as:</div>
+							<div id="userEmail" class="font-semibold text-blue-800">Loading...</div>
+							<div id="userRoles" class="text-xs text-blue-600 mt-1">Loading roles...</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Analytics Dashboard (now without the 'Available Actions' section) -->
+			<div id="analyticsSection" class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+				<!-- Stats cards; populated by JS -->
+				<div class="bg-white rounded-xl shadow-md p-6">
+					<div class="flex items-center justify-between">
+						<div>
+							<p class="text-sm font-medium text-gray-600 mb-1">Total Files</p>
+							<p id="totalFilesCount" class="text-2xl font-bold text-blue-600">-</p>
+						</div>
+						<div class="h-12 w-12 bg-blue-100 rounded-lg flex items-center justify-center">
+							<svg class="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.98 1.98 0 013 12V7a4 4 0 014-4z"
+								></path>
+							</svg>
+						</div>
+					</div>
+					<div class="mt-4 space-y-1">
+						<div class="flex items-center text-sm">
+							<span id="publicFilesCount" class="text-green-500 font-medium">-</span>
+							<span class="text-gray-500 ml-1">public</span>
+							<span class="text-gray-400 mx-2">•</span>
+							<span id="hiddenFilesCount" class="text-orange-500 font-medium">-</span>
+							<span class="text-gray-500 ml-1">hidden</span>
+						</div>
+						<div class="flex items-center text-sm">
+							<span id="expiredFilesCount" class="text-red-500 font-medium">-</span>
+							<span class="text-gray-500 ml-1">expired</span>
+						</div>
+					</div>
+				</div>
+
+				<div class="bg-white rounded-xl shadow-md p-6">
+					<div class="flex items-center justify-between">
+						<div>
+							<p class="text-sm font-medium text-gray-600 mb-1">File Status</p>
+							<p class="text-2xl font-bold text-green-600"><span id="activeFilesCount">-</span></p>
+						</div>
+						<div class="h-12 w-12 bg-green-100 rounded-lg flex items-center justify-center">
+							<svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+								></path>
+							</svg>
+						</div>
+					</div>
+					<div class="mt-4">
+						<div class="flex items-center text-sm">
+							<span class="text-green-500 font-medium">Active files</span><span class="text-gray-500 ml-1">(non-expired)</span>
+						</div>
+					</div>
+				</div>
+
+				<div class="bg-white rounded-xl shadow-md p-6">
+					<div class="flex items-center justify-between">
+						<div>
+							<p class="text-sm font-medium text-gray-600 mb-1">Total Storage</p>
+							<p id="totalStorageSize" class="text-2xl font-bold text-green-600">-</p>
+						</div>
+						<div class="h-12 w-12 bg-green-100 rounded-lg flex items-center justify-center">
+							<svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M4 7v10c0 2.21 3.79 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.79 4 8 4s8-1.79 8-4M4 7c0-2.21 3.79-4 8-4s8 1.79 8 4"
+								></path>
+							</svg>
+						</div>
+					</div>
+					<div class="mt-4">
+						<div class="w-full bg-gray-200 rounded-full h-2">
+							<div id="storageProgressBar" class="bg-green-600 h-2 rounded-full transition-all" style="width: 0%"></div>
+						</div>
+						<div class="flex justify-between text-xs text-gray-500 mt-1"><span>Used</span><span id="storageLimit">-</span></div>
+					</div>
+				</div>
+
+				<div class="bg-white rounded-xl shadow-md p-6">
+					<div class="flex items-center justify-between">
+						<div>
+							<p class="text-sm font-medium text-gray-600 mb-1">Avg File Size</p>
+							<p id="averageFileSize" class="text-2xl font-bold text-purple-600">-</p>
+						</div>
+						<div class="h-12 w-12 bg-purple-100 rounded-lg flex items-center justify-center">
+							<svg class="h-6 w-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+								></path>
+							</svg>
+						</div>
+					</div>
+					<div class="mt-4">
+						<div class="flex items-center text-sm">
+							<span id="largestFileSize" class="text-purple-500 font-medium">-</span><span class="text-gray-500 ml-1">largest file</span>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Action Buttons -->
+			<div class="flex flex-wrap gap-4 mb-8">
+				<button
+					id="refreshStatsBtn"
+					class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium cursor-pointer"
+				>
+					Refresh Stats
+				</button>
+				<button
+					id="cleanupExpiredBtn"
+					class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium cursor-pointer"
+				>
+					Cleanup Expired Files
+				</button>
+				<a
+					href="download.html"
+					target="_blank"
+					class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition font-medium cursor-pointer"
+					>Manage Files</a
+				>
+				<button
+					id="cloudflareR2Btn"
+					class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition font-medium cursor-pointer"
+				>
+					Cloudflare R2 Dashboard
+				</button>
+			</div>
+
+			<!-- Main upload + recent files -->
+			<div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+				<!-- Upload Section (SME/Admin only) -->
+				<div id="uploadSectionBox" class="bg-white rounded-2xl shadow-md p-6" data-required-roles="sme,admin">
+					<div class="flex items-center justify-between mb-4">
+						<h2 class="text-xl font-semibold text-gray-800">Upload New File</h2>
+						<div id="uploadPermission" class="text-sm px-3 py-1 rounded-full bg-green-100 text-green-800">Upload Permitted</div>
+					</div>
+
+					<!-- Status -->
+					<div id="statusMessage" class="hidden mb-4 p-3 rounded-lg"></div>
+
+					<!-- Upload Progress -->
+					<div id="uploadProgress" class="hidden mb-4">
+						<div class="flex justify-between items-center mb-2">
+							<span class="text-sm font-medium text-gray-700">Upload Progress</span>
+							<span id="progressPercent" class="text-sm text-gray-500">0%</span>
+						</div>
+						<div class="w-full bg-gray-200 rounded-full h-2">
+							<div id="progressBar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+						</div>
+						<div class="flex justify-between text-xs text-gray-500 mt-1">
+							<span id="uploadedSize">0 B</span>
+							<span id="totalSize">0 B</span>
+						</div>
+						<div class="flex justify-between text-xs text-gray-500 mt-1">
+							<span id="uploadSpeed">0 B/s</span>
+							<span id="eta">--</span>
+						</div>
+						<div class="mt-2 flex gap-2">
+							<button id="pauseBtn" class="px-3 py-1 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 transition hidden">
+								Pause
+							</button>
+							<button id="resumeBtn" class="px-3 py-1 bg-green-500 text-white text-sm rounded hover:bg-green-600 transition hidden">
+								Resume
+							</button>
+							<button id="cancelBtn" class="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600 transition hidden">
+								Cancel
+							</button>
+						</div>
+					</div>
+
+					<form id="uploadForm" class="space-y-4">
+						<!-- Drag & Drop Zone -->
+						<div
+							id="dropZone"
+							class="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 cursor-pointer bg-gray-50 hover:bg-gray-100 transition border-gray-300"
+						>
+							<div class="text-center">
+								<svg class="mx-auto h-12 w-12 text-gray-400 mb-3" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+									<path
+										d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									/>
+								</svg>
+								<p class="text-gray-600 text-sm mb-1">Drag & drop a file here, or click to select</p>
+								<p class="text-gray-500 text-xs">Supports resumable uploads for any file size</p>
+							</div>
+							<input type="file" id="fileInput" name="file" required class="hidden" />
+						</div>
+						<p id="fileName" class="text-xs text-gray-500"></p>
+
+						<!-- Upload Method Selection -->
+						<div class="space-y-3 p-4 bg-blue-50 rounded-lg border">
+							<h3 class="text-sm font-medium text-gray-700">Upload Method</h3>
+							<div class="space-y-2">
+								<label class="flex items-center">
+									<input type="radio" name="uploadMethod" value="tus" checked class="mr-2 text-blue-600" />
+									<span class="text-sm">TUS Resumable Upload (Recommended)</span>
+								</label>
+								<label class="flex items-center">
+									<input type="radio" name="uploadMethod" value="legacy" class="mr-2 text-blue-600" />
+									<span class="text-sm">Legacy Upload (For small files < 100MB)</span>
+								</label>
+							</div>
+						</div>
+
+						<!-- File Metadata -->
+						<div class="space-y-4">
+							<div>
+								<label for="description" class="block text-sm font-medium text-gray-700">Description</label>
+								<textarea
+									id="description"
+									name="description"
+									rows="2"
+									class="mt-1 block w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-3 focus:ring-blue-500 focus:border-blue-500"
+								></textarea>
+							</div>
+
+							<div>
+								<label for="tags" class="block text-sm font-medium text-gray-700">Tags (comma separated)</label>
+								<input
+									type="text"
+									id="tags"
+									name="tags"
+									class="mt-1 block w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-3 focus:ring-blue-500 focus:border-blue-500"
+									placeholder="e.g. project, report, confidential"
+								/>
+							</div>
+
+							<!-- Role-based Privacy Controls -->
+							<div class="space-y-3 p-4 bg-gray-50 rounded-lg border">
+								<h3 class="text-sm font-medium text-gray-700">Access Controls</h3>
+
+								<!-- Visibility -->
+								<div class="flex items-center gap-2">
+									<input
+										type="checkbox"
+										id="hideFromList"
+										name="hideFromList"
+										class="rounded-sm border-gray-300 text-blue-600 focus:ring-blue-500"
+									/>
+									<label for="hideFromList" class="text-sm text-gray-700">Hide from public list</label>
+								</div>
+								<p class="text-xs text-gray-500">When enabled, file will only be accessible via direct link</p>
+
+								<!-- Role-based access (Admin only) -->
+								<div id="roleAccessControls" class="hidden mt-2">
+									<label class="block text-sm font-medium text-gray-700 mb-2">Required Role for Access</label>
+									<select
+										id="requiredRole"
+										name="requiredRole"
+										class="mt-1 block w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-3 focus:ring-blue-500 focus:border-blue-500"
+									>
+										<option value="">No role restriction</option>
+										<option value="user">User and above</option>
+										<option value="sme">SME and above</option>
+										<option value="admin">Admin only</option>
+									</select>
+								</div>
+							</div>
+
+							<!-- Expiration Settings -->
+							<div class="space-y-3 p-4 bg-gray-50 rounded-lg border">
+								<div class="flex items-center gap-2">
+									<input type="checkbox" id="enableExpiration" class="rounded-sm border-gray-300 text-blue-600 focus:ring-blue-500" />
+									<label for="enableExpiration" class="text-sm font-medium text-gray-700">Set file expiration</label>
+								</div>
+
+								<div id="expirationSettings" class="hidden space-y-3">
+									<div>
+										<label class="block text-sm font-medium text-gray-700 mb-2">Quick presets</label>
+										<div class="grid grid-cols-2 gap-2">
+											<button
+												type="button"
+												data-hours="1"
+												class="preset-btn px-3 py-2 text-xs bg-white border border-gray-300 rounded-sm hover:bg-gray-50 transition"
+											>
+												1 hour
+											</button>
+											<button
+												type="button"
+												data-hours="24"
+												class="preset-btn px-3 py-2 text-xs bg-white border border-gray-300 rounded-sm hover:bg-gray-50 transition"
+											>
+												1 day
+											</button>
+											<button
+												type="button"
+												data-hours="72"
+												class="preset-btn px-3 py-2 text-xs bg-white border border-gray-300 rounded-sm hover:bg-gray-50 transition"
+											>
+												3 days
+											</button>
+											<button
+												type="button"
+												data-hours="168"
+												class="preset-btn px-3 py-2 text-xs bg-white border border-gray-300 rounded-sm hover:bg-gray-50 transition"
+											>
+												1 week
+											</button>
+										</div>
+									</div>
+
+									<div>
+										<label for="expiration" class="block text-sm font-medium text-gray-700">Custom expiration</label>
+										<input
+											type="datetime-local"
+											id="expiration"
+											name="expiration"
+											class="mt-1 block w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-3 focus:ring-blue-500 focus:border-blue-500"
+										/>
+									</div>
+
+									<div id="expirationPreview" class="hidden p-3 bg-blue-50 border border-blue-200 rounded-lg">
+										<div class="text-sm font-medium text-blue-800">Expiration Preview:</div>
+										<div id="expirationText" class="text-sm text-blue-700"></div>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- Submit -->
+						<div>
+							<button
+								type="submit"
+								id="submitButton"
+								class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
+							>
+								Upload
+							</button>
+						</div>
+					</form>
+				</div>
+
+				<!-- Recent Files -->
+				<div class="bg-white rounded-2xl shadow-md p-6">
+					<div class="flex items-center justify-between mb-4">
+						<h2 class="text-xl font-semibold text-gray-800">Recent Files</h2>
+						<button id="refreshRecentBtn" class="text-blue-600 hover:text-blue-700 text-sm font-medium">Refresh</button>
+					</div>
+					<div id="recentFiles" class="space-y-3">
+						<div class="text-center py-8 text-gray-500">
+							<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+							<p>Loading recent files...</p>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<script>
+			/* ========= GLOBAL STATE ========= */
+			let currentUser = null;
+			let currentUpload = null;
+			let uploadStartTime = 0;
+			let lastUploadedBytes = 0;
+			let lastProgressTime = 0;
+
+			const STATS_CACHE_DURATION = 30000;
+			let statsCache = null;
+			let statsCacheTime = 0;
+
+			/* ========= DOM REFS ========= */
+			const userEmailEl = document.getElementById('userEmail');
+			const userRolesEl = document.getElementById('userRoles');
+			const statusMessage = document.getElementById('statusMessage');
+
+			const progressBar = document.getElementById('progressBar');
+			const progressPercent = document.getElementById('progressPercent');
+			const uploadedSize = document.getElementById('uploadedSize');
+			const totalSize = document.getElementById('totalSize');
+			const uploadSpeed = document.getElementById('uploadSpeed');
+			const eta = document.getElementById('eta');
+
+			const pauseBtn = document.getElementById('pauseBtn');
+			const resumeBtn = document.getElementById('resumeBtn');
+			const cancelBtn = document.getElementById('cancelBtn');
+
+			const fileInput = document.getElementById('fileInput');
+			const fileNameEl = document.getElementById('fileName');
+			const dropZone = document.getElementById('dropZone');
+
+			const enableExpiration = document.getElementById('enableExpiration');
+			const expirationSettings = document.getElementById('expirationSettings');
+			const expirationInput = document.getElementById('expiration');
+			const expirationPreview = document.getElementById('expirationPreview');
+			const expirationText = document.getElementById('expirationText');
+			const presetButtons = document.querySelectorAll('.preset-btn');
+
+			const hideFromListCheckbox = document.getElementById('hideFromList');
+
+			/* ========= SMALL HELPERS ========= */
+			function setText(id, text) {
+				const el = document.getElementById(id);
+				if (el) el.textContent = text;
+			}
+			function showStatus(msg, isError = false) {
+				if (!statusMessage) return;
+				statusMessage.textContent = msg;
+				statusMessage.className = `mb-4 p-3 rounded-lg ${
+					isError ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-green-100 text-green-700 border border-green-300'
+				}`;
+				statusMessage.classList.remove('hidden');
+				setTimeout(() => statusMessage.classList.add('hidden'), 6000);
+			}
+			function hideStatus() {
+				if (statusMessage) statusMessage.classList.add('hidden');
+			}
+			function formatFileSize(bytes) {
+				if (bytes === 0) return '0 B';
+				if (bytes === undefined || bytes === null) return '—';
+				const k = 1024;
+				const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+				const i = Math.floor(Math.log(bytes) / Math.log(k));
+				return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+			}
+			function formatDate(s) {
+				if (!s) return '—';
+				try {
+					return new Date(s).toLocaleString();
+				} catch {
+					return s;
+				}
+			}
+			function secondsToHMS(s) {
+				if (!isFinite(s)) return '--';
+				s = Math.round(s);
+				const h = Math.floor(s / 3600),
+					m = Math.floor((s % 3600) / 60),
+					sec = s % 60;
+				return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+			}
+			const formatTime = secondsToHMS;
+			function escapeHtml(s = '') {
+				return String(s).replace(
+					/[&<>"'\/]/g,
+					(c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '/': '&#47;' }[c])
+				);
+			}
+
+			/* ========= RBAC UI ========= */
+			function applyRoleVisibility() {
+				const roles = currentUser?.roles || [];
+				document.querySelectorAll('[data-required-roles]').forEach((el) => {
+					const required = (el.getAttribute('data-required-roles') || '')
+						.split(',')
+						.map((r) => r.trim())
+						.filter(Boolean);
+					const allowed = required.length === 0 ? true : required.some((r) => roles.includes(r));
+					if (allowed) {
+						el.classList.remove('hidden');
+						el.style.display = '';
+					} else {
+						el.classList.add('hidden');
+						el.style.display = 'none';
+					}
+				});
+				if (roles.includes('admin')) document.getElementById('roleAccessControls')?.classList.remove('hidden');
+			}
+
+			/* ========= USER INFO ========= */
+			async function loadUserInfo() {
+				try {
+					const res = await fetch('/api/debug/jwt');
+					if (!res.ok) {
+						// try to parse JSON error message if any
+						let emsg = 'Failed to load user info';
+						try {
+							const j = await res.json();
+							if (j && j.error) emsg = j.error;
+						} catch {}
+						throw new Error(emsg);
+					}
+					const json = await res.json();
+					currentUser = json.extractedUser || { email: 'unknown', roles: [] };
+					if (userEmailEl) userEmailEl.textContent = currentUser.email || 'unknown';
+					if (userRolesEl)
+						userRolesEl.textContent = currentUser.roles && currentUser.roles.length ? currentUser.roles.join(', ') : 'no roles';
+					applyRoleVisibility();
+				} catch (err) {
+					console.error('loadUserInfo', err);
+					if (userEmailEl) userEmailEl.textContent = 'error';
+					if (userRolesEl) userRolesEl.textContent = 'error';
+				}
+			}
+
+			/* ========= ANALYTICS ========= */
+			async function loadAnalytics() {
+				try {
+					const now = Date.now();
+					if (statsCache && now - statsCacheTime < STATS_CACHE_DURATION) {
+						updateAnalyticsUI(statsCache);
+						return;
+					}
+					const isAdmin = (currentUser?.roles || []).includes('admin');
+					const endpoint = isAdmin ? '/api/admin/list?includeExpired=true&includeHidden=true' : '/api/list';
+					const res = await fetch(endpoint);
+					const json = await res.json();
+					if (!res.ok && !json.success) throw new Error(json.error || 'failed');
+					let stats = json.stats || {};
+					if (!json.stats && Array.isArray(json.files)) {
+						const files = json.files;
+						const totalFiles = files.length;
+						const totalSize = files.reduce((s, f) => s + (f.size || 0), 0);
+						const expiredFiles = files.filter((f) => f.expiration && new Date(f.expiration) <= new Date()).length;
+						const hiddenFiles = files.filter((f) => f.hideFromList).length;
+						const publicFiles = totalFiles - hiddenFiles;
+						const averageSize = totalFiles ? Math.round(totalSize / totalFiles) : 0;
+						const largestFileSize = files.reduce((m, f) => Math.max(m, f.size || 0), 0);
+						stats = { totalFiles, totalSize, averageSize, largestFileSize, expiredFiles, hiddenFiles, publicFiles };
+					}
+					statsCache = stats;
+					statsCacheTime = now;
+					updateAnalyticsUI(stats);
+				} catch (err) {
+					console.error('loadAnalytics', err);
+					showStatus('Failed to load analytics', true);
+				}
+			}
+			function updateAnalyticsUI(stats) {
+				setText('totalFilesCount', (stats.totalFiles || 0).toLocaleString());
+				setText('totalStorageSize', formatFileSize(stats.totalSize || 0));
+				setText('averageFileSize', formatFileSize(stats.averageSize || 0));
+				setText('expiredFilesCount', (stats.expiredFiles || 0).toLocaleString());
+				setText('hiddenFilesCount', (stats.hiddenFiles || 0).toLocaleString());
+				setText('publicFilesCount', (stats.publicFiles || 0).toLocaleString());
+				setText('largestFileSize', formatFileSize(stats.largestFileSize || 0));
+				const active = (stats.totalFiles || 0) - (stats.expiredFiles || 0);
+				setText('activeFilesCount', (active >= 0 ? active : 0).toLocaleString());
+				const maxStorage = 10 * 1024 * 1024 * 1024;
+				const usagePct = maxStorage ? ((stats.totalSize || 0) / maxStorage) * 100 : 0;
+				const bar = document.getElementById('storageProgressBar');
+				if (bar) {
+					bar.style.width = Math.min(usagePct, 100) + '%';
+					if (usagePct > 90) bar.className = 'bg-red-600 h-2 rounded-full transition-all';
+					else if (usagePct > 75) bar.className = 'bg-yellow-600 h-2 rounded-full transition-all';
+					else bar.className = 'bg-green-600 h-2 rounded-full transition-all';
+				}
+				setText('storageLimit', formatFileSize(maxStorage) + ' limit');
+			}
+
+			/* ========= RECENT FILES ========= */
+			async function loadRecentFiles() {
+				try {
+					const recent = document.getElementById('recentFiles');
+					if (recent) recent.innerHTML = '<div class="text-center py-4 text-gray-500">Loading recent files...</div>';
+					const isAdmin = (currentUser?.roles || []).includes('admin');
+					const endpoint = isAdmin ? '/api/admin/list?includeHidden=true&limit=5' : '/api/list?limit=5';
+					const res = await fetch(endpoint);
+					const json = await res.json();
+					if (!res.ok && !json.success) throw new Error(json.error || 'failed');
+					const files = json.files || [];
+					if (!files.length) {
+						if (recent) recent.innerHTML = '<div class="text-center py-8 text-gray-500">No files uploaded yet</div>';
+						return;
+					}
+					const html = files
+						.map((f) => {
+							const isExpired = f.expiration && new Date(f.expiration) <= new Date();
+							const badge = isExpired
+								? '<span class="px-2 py-1 text-xs bg-red-100 text-red-700 rounded-full">Expired</span>'
+								: f.hideFromList
+								? '<span class="px-2 py-1 text-xs bg-orange-100 text-orange-700 rounded-full">Hidden</span>'
+								: '<span class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded-full">Active</span>';
+							return `<div class="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
+			        <div class="flex-1 min-w-0">
+			          <div class="flex items-center gap-2 mb-1">
+			            <p class="text-sm font-medium text-gray-900 truncate">${escapeHtml(f.filename)}</p>${badge}
+			          </div>
+			          <div class="flex items-center gap-4 text-xs text-gray-500"><span>${formatFileSize(f.size)}</span><span>${formatDate(
+								f.uploadedAt
+							)}</span></div>
+			        </div>
+			        <div class="flex gap-2">${
+								!isExpired ? `<a href="${f.downloadUrl}" class="text-blue-600 hover:text-blue-700 text-xs">Download</a>` : ''
+							}<button onclick="copyFileId('${f.fileId}')" class="text-gray-500 hover:text-gray-700 text-xs">Copy ID</button></div>
+			      </div>`;
+						})
+						.join('');
+					if (recent) recent.innerHTML = html;
+				} catch (err) {
+					console.error('loadRecentFiles', err);
+					const recent = document.getElementById('recentFiles');
+					if (recent) recent.innerHTML = '<div class="text-center py-8 text-red-500">Failed to load recent files</div>';
+				}
+			}
+
+			/* ========= EXPIRATION HELPERS ========= */
+			function setMinDateTime() {
+				const now = new Date();
+				now.setMinutes(now.getMinutes() + 1);
+				if (expirationInput) expirationInput.min = now.toISOString().slice(0, 16);
+			}
+			function updateExpirationPreview() {
+				if (!enableExpiration.checked || !expirationInput.value) {
+					if (expirationPreview) expirationPreview.classList.add('hidden');
+					return;
+				}
+				try {
+					const d = new Date(expirationInput.value);
+					if (d <= new Date()) {
+						if (expirationText) expirationText.textContent = 'Invalid: Expiration must be in the future';
+						if (expirationPreview) expirationPreview.classList.remove('hidden');
+						return;
+					}
+					const diffMs = d.getTime() - Date.now();
+					const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+					const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+					const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+					let timeLeft = '';
+					if (diffDays > 0) {
+						timeLeft = `${diffDays} day${diffDays > 1 ? 's' : ''}`;
+						if (diffHours > 0) timeLeft += `, ${diffHours} hour${diffHours > 1 ? 's' : ''}`;
+					} else if (diffHours > 0) {
+						timeLeft = `${diffHours} hour${diffHours > 1 ? 's' : ''}`;
+						if (diffMinutes > 0) timeLeft += `, ${diffMinutes} minute${diffMinutes > 1 ? 's' : ''}`;
+					} else timeLeft = `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''}`;
+					if (expirationText)
+						expirationText.innerHTML = `<div>File will expire on: <strong>${d.toLocaleString()}</strong></div><div>Time until expiration: <strong>${timeLeft}</strong></div>`;
+					if (expirationPreview) expirationPreview.classList.remove('hidden');
+				} catch (err) {
+					if (expirationText) expirationText.textContent = 'Invalid date format';
+					if (expirationPreview) expirationPreview.classList.remove('hidden');
+				}
+			}
+
+			/* ========= CHECKSUM ========= */
+			async function computeChecksum(file) {
+				try {
+					const arrayBuffer = await file.arrayBuffer();
+					const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+					return Array.from(new Uint8Array(hashBuffer))
+						.map((b) => b.toString(16).padStart(2, '0'))
+						.join('');
+				} catch (err) {
+					console.error('Error computing checksum', err);
+					return '';
+				}
+			}
+
+			/* ========= TUS UPLOAD ========= */
+			function showUploadProgress() {
+				const up = document.getElementById('uploadProgress');
+				if (up) up.classList.remove('hidden');
+			}
+			function hideUploadProgress() {
+				const up = document.getElementById('uploadProgress');
+				if (up) up.classList.add('hidden');
+				if (progressBar) progressBar.style.width = '0%';
+				if (progressPercent) progressPercent.textContent = '0%';
+				if (uploadedSize) uploadedSize.textContent = '0 B';
+				if (totalSize) totalSize.textContent = '0 B';
+				if (uploadSpeed) uploadSpeed.textContent = '0 B/s';
+				if (eta) eta.textContent = '--';
+			}
+
+			async function startTusUpload(file) {
+				showUploadProgress();
+				setLoading(true);
+				uploadStartTime = Date.now();
+				lastUploadedBytes = 0;
+				lastProgressTime = Date.now();
+				hideStatus();
+
+				try {
+					// compute checksum
+					showStatus('Computing file checksum...');
+					const checksum = await computeChecksum(file);
+					hideStatus();
+
+					// Build metadata object (strings)
+					const metadata = {
+						filename: file.name,
+						contentType: file.type || 'application/octet-stream',
+						description: (document.getElementById('description')?.value || '').trim(),
+						tags: (document.getElementById('tags')?.value || '').trim(),
+						hideFromList: hideFromListCheckbox.checked ? 'true' : 'false',
+						checksum: checksum || '',
+					};
+
+					// Admin-only requiredRole
+					const userRoles = currentUser?.roles || [];
+					if (userRoles.includes('admin')) {
+						const requiredRole = document.getElementById('requiredRole')?.value;
+						if (requiredRole) metadata.requiredRole = requiredRole;
+					}
+
+					// Expiration if enabled
+					if (enableExpiration.checked && expirationInput.value) {
+						const expirationDate = new Date(expirationInput.value);
+						metadata.expiration = expirationDate.toISOString();
+					}
+
+					// strip empty values and pass raw strings (tus-js-client will encode them)
+					const tusMetadata = {};
+					for (const [k, v] of Object.entries(metadata)) {
+						if (v === undefined || v === null || String(v).trim() === '') continue;
+						tusMetadata[k] = String(v);
+					}
+
+					const options = {
+						endpoint: '/api/upload/tus',
+						metadata: tusMetadata,
+						retryDelays: [0, 3000, 5000, 10000, 20000],
+						chunkSize: 10 * 1024 * 1024,
+						storeFingerprintForResuming: true,
+						removeFingerprintOnSuccess: true,
+						onError: (error) => {
+							console.error('TUS upload error:', error);
+							showStatus(`Upload failed: ${error && error.message ? error.message : String(error)}`, true);
+							hideUploadProgress();
+							setLoading(false);
+							currentUpload = null;
+							if (pauseBtn) pauseBtn.classList.add('hidden');
+							if (resumeBtn) resumeBtn.classList.add('hidden');
+							if (cancelBtn) cancelBtn.classList.add('hidden');
+						},
+						onProgress: (bytesUploaded, bytesTotal) => {
+							const percent = (bytesUploaded / bytesTotal) * 100;
+							if (progressBar) progressBar.style.width = percent + '%';
+							if (progressPercent) progressPercent.textContent = Math.round(percent) + '%';
+							if (uploadedSize) uploadedSize.textContent = formatFileSize(bytesUploaded);
+							if (totalSize) totalSize.textContent = formatFileSize(bytesTotal);
+
+							const now = Date.now();
+							const timeDiff = (now - lastProgressTime) / 1000;
+							const bytesDiff = bytesUploaded - lastUploadedBytes;
+
+							if (timeDiff > 0.5) {
+								const speed = bytesDiff / Math.max(timeDiff, 0.001);
+								if (uploadSpeed) uploadSpeed.textContent = formatFileSize(speed) + '/s';
+								const remainingBytes = bytesTotal - bytesUploaded;
+								const etaSeconds = speed > 0 ? remainingBytes / speed : 0;
+								if (eta) eta.textContent = formatTime(etaSeconds);
+								lastUploadedBytes = bytesUploaded;
+								lastProgressTime = now;
+							}
+						},
+						onSuccess: async () => {
+							showStatus('File uploaded successfully!');
+							hideUploadProgress();
+							setLoading(false);
+							document.getElementById('uploadForm')?.reset();
+							if (fileNameEl) fileNameEl.textContent = '';
+							currentUpload = null;
+							await loadAnalytics();
+							await loadRecentFiles();
+							if (pauseBtn) pauseBtn.classList.add('hidden');
+							if (resumeBtn) resumeBtn.classList.add('hidden');
+							if (cancelBtn) cancelBtn.classList.add('hidden');
+						},
+					};
+
+					// create upload
+					currentUpload = new tus.Upload(file, options);
+					currentUpload.start();
+
+					// show pause/cancel button
+					if (pauseBtn) pauseBtn.classList.remove('hidden');
+					if (cancelBtn) cancelBtn.classList.remove('hidden');
+					if (resumeBtn) resumeBtn.classList.add('hidden');
+				} catch (err) {
+					console.error('Error preparing TUS upload (checksum or metadata):', err);
+					showStatus('Failed to start TUS upload: ' + (err && err.message ? err.message : String(err)), true);
+					setLoading(false);
+					hideUploadProgress();
+				}
+			}
+
+			/* ========= LEGACY UPLOAD ========= */
+			async function startLegacyUpload(file) {
+				setLoading(true);
+				hideStatus();
+				try {
+					showStatus('Computing file checksum...');
+					const checksum = await computeChecksum(file);
+					hideStatus();
+					const form = new FormData();
+					form.append('file', file);
+					form.append('description', (document.getElementById('description')?.value || '').trim());
+					form.append('tags', (document.getElementById('tags')?.value || '').trim());
+					form.append('hideFromList', hideFromListCheckbox.checked ? 'true' : 'false');
+					form.append('checksum', checksum);
+					const roles = currentUser?.roles || [];
+					if (roles.includes('admin')) {
+						const rr = document.getElementById('requiredRole')?.value;
+						if (rr) form.append('requiredRole', rr);
+					}
+					if (enableExpiration.checked && expirationInput.value) form.append('expiration', new Date(expirationInput.value).toISOString());
+					const req = await fetch('/api/admin/upload', { method: 'POST', body: form });
+					const json = await req.json();
+					if (!req.ok || !json.success) throw new Error(json.error || 'upload failed');
+					showStatus(`Uploaded (id: ${json.fileId})`);
+					document.getElementById('uploadForm')?.reset();
+					if (fileNameEl) fileNameEl.textContent = '';
+					await loadAnalytics();
+					await loadRecentFiles();
+				} catch (err) {
+					console.error('legacy upload', err);
+					showStatus('Upload failed: ' + (err.message || err), true);
+				} finally {
+					setLoading(false);
+				}
+			}
+
+			/* ========= UI wiring ========= */
+			dropZone?.addEventListener('click', () => fileInput?.click());
+			dropZone?.addEventListener('dragover', (e) => {
+				e.preventDefault();
+				dropZone.classList.add('bg-blue-50', 'border-blue-400');
+			});
+			dropZone?.addEventListener('dragleave', (e) => {
+				e.preventDefault();
+				dropZone.classList.remove('bg-blue-50', 'border-blue-400');
+			});
+			dropZone?.addEventListener('drop', (e) => {
+				e.preventDefault();
+				dropZone.classList.remove('bg-blue-50', 'border-blue-400');
+				if (e.dataTransfer.files.length) {
+					fileInput.files = e.dataTransfer.files;
+					const f = fileInput.files[0];
+					if (fileNameEl) fileNameEl.textContent = `Selected: ${f.name} (${(f.size / 1024 / 1024).toFixed(2)} MB)`;
+					hideStatus();
+				}
+			});
+			fileInput?.addEventListener('change', () => {
+				if (fileInput.files && fileInput.files.length) {
+					const f = fileInput.files[0];
+					if (fileNameEl) fileNameEl.textContent = `Selected: ${f.name} (${(f.size / 1024 / 1024).toFixed(2)} MB)`;
+					hideStatus();
+				}
+			});
+
+			presetButtons.forEach((btn) =>
+				btn.addEventListener('click', (e) => {
+					e.preventDefault();
+					const hours = Number(btn.getAttribute('data-hours') || 0);
+					const d = new Date();
+					d.setHours(d.getHours() + hours);
+					const year = d.getFullYear(),
+						month = String(d.getMonth() + 1).padStart(2, '0'),
+						day = String(d.getDate()).padStart(2, '0'),
+						hh = String(d.getHours()).padStart(2, '0'),
+						mm = String(d.getMinutes()).padStart(2, '0');
+					if (expirationInput) expirationInput.value = `${year}-${month}-${day}T${hh}:${mm}`;
+					updateExpirationPreview();
+					presetButtons.forEach((b) => b.classList.remove('bg-blue-100', 'border-blue-400', 'text-blue-700'));
+					btn.classList.add('bg-blue-100', 'border-blue-400', 'text-blue-700');
+				})
+			);
+
+			enableExpiration?.addEventListener('change', () => {
+				if (enableExpiration.checked) {
+					expirationSettings.classList.remove('hidden');
+					updateExpirationPreview();
+				} else {
+					expirationSettings.classList.add('hidden');
+					expirationPreview.classList.add('hidden');
+					if (expirationInput) expirationInput.value = '';
+				}
+			});
+			expirationInput?.addEventListener('input', updateExpirationPreview);
+			expirationInput?.addEventListener('change', updateExpirationPreview);
+
+			document.getElementById('uploadForm')?.addEventListener('submit', async (e) => {
+				e.preventDefault();
+				hideStatus();
+				if (!fileInput.files || fileInput.files.length === 0) {
+					showStatus('Please select a file', true);
+					return;
+				}
+				if (enableExpiration.checked && expirationInput.value) {
+					const ex = new Date(expirationInput.value);
+					if (isNaN(ex.getTime()) || ex <= new Date()) {
+						showStatus('Expiration must be in the future', true);
+						return;
+					}
+				}
+				const file = fileInput.files[0];
+				const method = document.querySelector('input[name="uploadMethod"]:checked')?.value || 'legacy';
+				if (method === 'tus') {
+					try {
+						await startTusUpload(file);
+					} catch (err) {
+						console.error(err);
+						showStatus('TUS start failed', true);
+						setLoading(false);
+					}
+				} else {
+					await startLegacyUpload(file);
+				}
+			});
+
+			pauseBtn?.addEventListener('click', () => {
+				if (!currentUpload) return;
+				try {
+					currentUpload.abort();
+					if (pauseBtn) pauseBtn.classList.add('hidden');
+					if (resumeBtn) resumeBtn.classList.remove('hidden');
+					showStatus('Upload paused');
+				} catch (e) {
+					console.warn(e);
+				}
+			});
+			resumeBtn?.addEventListener('click', () => {
+				if (!currentUpload) return;
+				try {
+					currentUpload.start();
+					if (resumeBtn) resumeBtn.classList.add('hidden');
+					if (pauseBtn) pauseBtn.classList.remove('hidden');
+					hideStatus();
+				} catch (e) {
+					console.warn(e);
+					showStatus('Resume failed', true);
+				}
+			});
+			cancelBtn?.addEventListener('click', () => {
+				if (currentUpload) {
+					try {
+						currentUpload.abort(true);
+					} catch (e) {
+						try {
+							currentUpload.abort();
+						} catch (_) {}
+					}
+					currentUpload = null;
+					hideUploadProgress();
+					setLoading(false);
+					if (pauseBtn) pauseBtn.classList.add('hidden');
+					if (resumeBtn) resumeBtn.classList.add('hidden');
+					if (cancelBtn) cancelBtn.classList.add('hidden');
+					showStatus('Upload cancelled', true);
+					return;
+				}
+				showStatus('No active resumable upload to cancel', true);
+			});
+
+			document.getElementById('refreshStatsBtn')?.addEventListener('click', () => {
+				statsCache = null;
+				loadAnalytics();
+			});
+			document.getElementById('refreshRecentBtn')?.addEventListener('click', loadRecentFiles);
+			document.getElementById('cleanupExpiredBtn')?.addEventListener('click', cleanupExpiredFiles);
+			document.getElementById('cloudflareR2Btn')?.addEventListener('click', async () => {
+				try {
+					const res = await fetch('/api/admin/r2-info');
+					const json = await res.json();
+					if (!res.ok || !json.success) {
+						showStatus('Failed to get R2 info', true);
+						return;
+					}
+					const url = `https://dash.cloudflare.com/${json.accountId}/r2/default/buckets/${json.bucketName}`;
+					window.open(url, '_blank');
+				} catch (err) {
+					showStatus('Error opening Cloudflare R2 dashboard', true);
+				}
+			});
+
+			/* ========= FILE ACTIONS (stubs call server handlers) ========= */
+			async function loadUserFiles() {
+				try {
+					const res = await fetch('/api/list');
+					const json = await res.json();
+					if (!res.ok) throw new Error(json.error || 'Failed'); /* display files if desired */
+				} catch (err) {
+					console.error(err);
+					showStatus('Failed to load files', true);
+				}
+			}
+			async function loadSMEReports() {
+				try {
+					const res = await fetch('/api/sme');
+					const json = await res.json();
+					showStatus('SME reports loaded');
+					console.log(json);
+				} catch (e) {
+					showStatus('Failed to load SME reports', true);
+				}
+			}
+			async function loadManagementData() {
+				try {
+					const res = await fetch('/api/management');
+					const json = await res.json();
+					showStatus('Management data loaded');
+					console.log(json);
+				} catch (e) {
+					showStatus('Failed to load management data', true);
+				}
+			}
+			async function loadAllFiles() {
+				const roles = currentUser?.roles || [];
+				if (!roles.includes('admin')) {
+					showStatus('Access denied: Admin role required', true);
+					return;
+				}
+				try {
+					await loadRecentFiles();
+				} catch (e) {}
+			}
+			async function cleanupExpiredFiles() {
+				if (!confirm('Delete all expired files? This cannot be undone.')) return;
+				try {
+					const res = await fetch('/api/admin/cleanup', { method: 'POST' });
+					const json = await res.json();
+					if (res.ok && json.success) {
+						showStatus(`Cleanup completed: ${json.deletedCount} deleted`);
+						statsCache = null;
+						await loadAnalytics();
+						await loadRecentFiles();
+					} else throw new Error(json.error || 'cleanup failed');
+				} catch (err) {
+					showStatus('Cleanup failed: ' + (err.message || err), true);
+				}
+			}
+
+			/* ========= MISC ========= */
+			function setLoading(loading) {
+				const btn = document.getElementById('submitButton');
+				if (btn) {
+					btn.disabled = loading;
+					btn.textContent = loading ? 'Uploading...' : 'Upload';
+				}
+			}
+			function copyFileId(id) {
+				navigator.clipboard
+					.writeText(id)
+					.then(() => showStatus('File ID copied'))
+					.catch(() => showStatus('Copy failed', true));
+			}
+			window.copyFileId = copyFileId;
+
+			setMinDateTime();
+			(async function init() {
+				try {
+					await loadUserInfo();
+					await loadAnalytics();
+					await loadRecentFiles();
+				} catch (err) {
+					console.error('init', err);
+					showStatus('Initialization error', true);
+				}
+			})();
+		</script>
+	</body>
+</html>

@@ -1,0 +1,50 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "file-sharing-platform",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-09-15",
+	"compatibility_flags": ["global_fetch_strictly_public"],
+	"assets": {
+		// The path to the directory containing the `index.html` file to be served at `/`
+		"directory": "./public"
+	},
+	"observability": {
+		"enabled": true
+	},
+	"routes": [
+		{
+			"pattern": "files.automatic-demo.com",
+			"custom_domain": true
+		}
+	],
+	"workers_dev": false,
+	"kv_namespaces": [
+		{
+			"binding": "FILE_METADATA",
+			"id": "ee66296fba274991a379d269f67a50e6"
+		}
+	],
+	"r2_buckets": [
+		{
+			"bucket_name": "file-sharing-platform-files",
+			"binding": "R2_FILES"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "ROLES_DB",
+			"database_name": "file-sharing-platform-user-roles",
+			"database_id": "a1c8373e-8ede-4286-ad6d-e72d2cbccc8c"
+		}
+	],
+	"vars": {
+		"MAX_DIRECT_UPLOAD": "100000000", // 100MB threshold for multipart uploads
+		"MAX_TOTAL_FILE_SIZE": "5000000000", // 5GB maximum allowed total file size upload
+		"R2_BUCKET_NAME": "file-sharing-platform-files",
+		"ENVIRONMENT": "production"
+	}
+}
