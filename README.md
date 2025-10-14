@@ -67,6 +67,17 @@ graph TB
     class K,L upload
 ```
 
+## Screenshots
+
+Admin Dashboard
+![Admin Dashboard](public/images/admin-dashboard.png)
+
+File Manager Admin View
+![File Manager Admin Role](public/images/file-manager.png)
+
+File Manager Public View
+![File Manager Public Role](public/images/file-manager-public.png)
+
 ## Quick Deploy
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/DavidJKTofan/cloudflare-file-sharing-platform)
