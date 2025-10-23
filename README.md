@@ -381,6 +381,7 @@ npx wrangler dev
 
 Inspired by projects in the Cloudflare ecosystem:
 
+- https://github.com/harshil1712/cf-access-demo
 - https://r2explorer.com/
 - https://github.com/james-elicx/cloudy
 - https://github.com/EvickaStudio/r2-explorer
