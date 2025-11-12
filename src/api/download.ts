@@ -90,9 +90,11 @@ export async function handleDownload(c: Context<{ Bindings: Env; Variables: { us
 		throw new HTTPException(404, { message: 'File data could not be retrieved.' });
 	}
 
+	const requestedFilename = c.req.query('filename');
+
 	const headers = new Headers({
 		'Content-Type': object.httpMetadata?.contentType || 'application/octet-stream',
-		'Content-Disposition': `attachment; filename="${customMetadata.filename || fileId}"`,
+		'Content-Disposition': `attachment; filename="${requestedFilename || customMetadata.filename || fileId}"`,
 		ETag: object.httpEtag,
 	});
 

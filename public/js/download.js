@@ -258,7 +258,9 @@ document.addEventListener('DOMContentLoaded', () => {
             ${
 							isExpired
 								? '<span class="px-3 py-1 bg-red-100 text-red-700 text-xs rounded-sm border">🚫 Expired</span>'
-								: `<a href="${file.downloadUrl}" target="_blank" class="inline-block px-3 py-1 bg-blue-600 text-white text-xs rounded-sm hover:bg-blue-700 transition">📥 Download</a>`
+								: `<a href="${file.downloadUrl}?filename=${encodeURIComponent(
+										file.filename,
+								  )}" target="_blank" class="inline-block px-3 py-1 bg-blue-600 text-white text-xs rounded-sm hover:bg-blue-700 transition">📥 Download</a>`
 						}
             <button data-action="copy-id" data-file-id="${escapeHtml(
 							file.fileId,
