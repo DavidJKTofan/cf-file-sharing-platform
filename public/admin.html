@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
@@ -26,6 +26,26 @@
 							<div class="text-sm text-gray-600">Authenticated as:</div>
 							<div id="userEmail" class="font-semibold text-blue-800">Loading...</div>
 							<div id="userRoles" class="text-xs text-blue-600 mt-1">Loading roles...</div>
+
+							<!-- Small logout button (opens in a new tab as requested) -->
+							<a
+								href="https://do-droplet-dt.cloudflareaccess.com/cdn-cgi/access/logout"
+								target="_self"
+								rel="noopener noreferrer"
+								id="logoutBtn"
+								class="inline-flex items-center mt-3 px-3 py-1 text-sm font-medium rounded-md bg-red-50 text-red-700 border border-red-100 hover:bg-red-100 transition"
+								aria-label="Logout (opens in new tab)"
+							>
+								<svg class="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h5a2 2 0 012 2v1"
+									/>
+								</svg>
+								Logout
+							</a>
 						</div>
 					</div>
 				</div>
@@ -242,7 +262,7 @@
 								</label>
 								<label class="flex items-center">
 									<input type="radio" name="uploadMethod" value="legacy" class="mr-2 text-blue-600" />
-									<span class="text-sm">Legacy Upload (For small files < 100MB)</span>
+									<span class="text-sm">Legacy Upload (For small files &lt; 100MB)</span>
 								</label>
 							</div>
 						</div>
