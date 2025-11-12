@@ -90,13 +90,83 @@ export async function handleDownload(c: Context<{ Bindings: Env; Variables: { us
 		throw new HTTPException(404, { message: 'File data could not be retrieved.' });
 	}
 
-	const requestedFilename = c.req.query('filename');
+	// Helper: sanitize a filename for use in headers and as fallback
+	function sanitizeFilename(input?: string | null): string {
+		if (!input) return '';
+		// strip control chars (including newlines), trim
+		let name = String(input)
+			.replace(/[\u0000-\u001F\u007F]/g, '')
+			.trim();
+		// remove any path components
+		name = name.split(/[\\/]+/).pop() || name;
+		// collapse whitespace
+		name = name.replace(/\s+/g, ' ');
+		// limit length (some browsers choke on very long names)
+		if (name.length > 250) name = name.slice(0, 250);
+		// final trim
+		return name || '';
+	}
 
-	const headers = new Headers({
-		'Content-Type': object.httpMetadata?.contentType || 'application/octet-stream',
-		'Content-Disposition': `attachment; filename="${requestedFilename || customMetadata.filename || fileId}"`,
-		ETag: object.httpEtag,
-	});
+	function makeAsciiFallback(name: string): string {
+		// Replace non-ASCII characters with underscore so header `filename=` is ASCII-only
+		const fallback = name.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
+		return fallback || 'file';
+	}
+
+	function quoteFilenameForHeader(name: string): string {
+		// escape quotes and backslashes for a quoted-string
+		return name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+	}
+
+	// Candidate filenames in preferred order:
+	// 1) explicit ?filename= query param (if provided)
+	// 2) kvMetadata.filename (if present)
+	// 3) customMetadata.filename or customMetadata.originalName
+	// 4) last segment of r2Key
+	// 5) fallback 'file'
+	const requestedFilenameRaw = c.req.query('filename') || null;
+
+	const derivedFromKey = (() => {
+		try {
+			const seg = r2Key.split('/').pop() || '';
+			// decode percent-encoding if present
+			return decodeURIComponent(seg);
+		} catch (e) {
+			return r2Key.split('/').pop() || '';
+		}
+	})();
+
+	const candidates = [requestedFilenameRaw, kvMetadata?.filename, customMetadata?.filename, customMetadata?.originalName, derivedFromKey];
+
+	let chosen = '';
+	for (const cand of candidates) {
+		const s = sanitizeFilename(cand);
+		if (s) {
+			chosen = s;
+			break;
+		}
+	}
+	if (!chosen) chosen = 'file';
+
+	// Build header-safe variants
+	const utf8Name = chosen; // original UTF-8 name
+	const asciiFallback = makeAsciiFallback(utf8Name);
+	const quotedAscii = quoteFilenameForHeader(asciiFallback);
+
+	// Content-Type (fall back to generic) and Content-Length if available
+	const contentType = (object.httpMetadata && object.httpMetadata.contentType) || 'application/octet-stream';
+
+	const headers = new Headers();
+	headers.set('Content-Type', contentType);
+	if (typeof object.size === 'number') {
+		headers.set('Content-Length', String(object.size));
+	}
+	// Set both filename (ASCII-safe quoted) and filename* (RFC5987 UTF-8)
+	// Example: Content-Disposition: attachment; filename="report.pdf"; filename*=UTF-8''report%20with%20utf8.pdf
+	const disposition = `attachment; filename="${quotedAscii}"; filename*=UTF-8''${encodeURIComponent(utf8Name)}`;
+	headers.set('Content-Disposition', disposition);
+
+	if (object.httpEtag) headers.set('ETag', object.httpEtag);
 
 	if (customMetadata.checksum) {
 		headers.set('x-file-checksum', customMetadata.checksum);
