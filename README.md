@@ -1,6 +1,17 @@
 # File Sharing Platform
 
-A modern file sharing platform built on Cloudflare's edge infrastructure. Upload files with expiration dates, privacy controls, and comprehensive admin management.
+This is a file-sharing platform built on Cloudflare's edge infrastructure. It allows users to upload files with expiration dates and privacy controls, and provides an admin dashboard for file management.
+
+The project is a serverless application with the following components:
+
+- **Backend**: Cloudflare Workers written in TypeScript, using the Hono web framework.
+- **File Storage**: Cloudflare R2 for object storage.
+- **Metadata Storage**: Cloudflare KV for storing file metadata.
+- **User Roles**: Cloudflare D1 for managing user roles and permissions.
+- **Authentication**: Cloudflare Access for securing admin endpoints.
+- **Frontend**: Vanilla JavaScript, HTML, and Tailwind CSS.
+
+The application supports two upload methods: a legacy `multipart/form-data` upload and a modern, resumable upload using the TUS protocol.
 
 ## Architecture
 
@@ -82,82 +93,62 @@ File Manager Public View
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/DavidJKTofan/cloudflare-file-sharing-platform)
 
-## Manual Setup
+## Building and Running
 
 ### Prerequisites
 
 - [Cloudflare Account](https://dash.cloudflare.com/sign-up)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/)
-- [Node.js](https://nodejs.org/) (for Tailwind CSS builds)
 
-### 1. Clone & Install
+* [Node.js](https://nodejs.org/) (for Tailwind CSS builds) and [npm](https://www.npmjs.com/)
+* [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/)
 
-```bash
-git clone https://github.com/DavidJKTofan/cloudflare-file-sharing-platform.git
-cd file-sharing-platform
-npm install
-```
+### Installation
 
-### 2. Create Cloudflare Resources
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/DavidJKTofan/cloudflare-file-sharing-platform.git
+    ```
+2.  Install dependencies:
+    ```bash
+    npm install
+    ```
 
-Create the required Cloudflare resources:
+### Running Locally
 
-```bash
-# Create R2 bucket
-npx wrangler r2 bucket create file-sharing-platform-files
-
-# Create KV namespace
-npx wrangler kv namespace create FILE_METADATA
-
-# Create D1 database
-npx wrangler d1 create file-sharing-platform-user-roles
-# Upload D1 schema
-npx wrangler d1 execute file-sharing-platform-user-roles --remote --file=./1_create_user_roles.sql
-```
-
-### 3. Configure Environment
-
-Update `wrangler.jsonc` with your resource IDs:
-
-```jsonc
-{
-	"kv_namespaces": [
-		{
-			"binding": "FILE_METADATA",
-			"id": "<YOUR_KV_NAMESPACE_ID>"
-		}
-	],
-	"r2_buckets": [
-		{
-			"bucket_name": "file-sharing-platform-files",
-			"binding": "R2_FILES"
-		}
-	],
-	"d1_databases": [
-		{
-			"binding": "ROLES_DB",
-			"database_name": "file-sharing-platform-user-roles",
-			"database_id": "<YOUR_D1_ID>"
-		}
-	]
-}
-```
-
-### 4. Set Secrets
-
-For enhanced security with expiring files, configure R2 API credentials:
+To start the local development server, run:
 
 ```bash
-npx wrangler secret put R2_ACCESS_KEY_ID
-npx wrangler secret put R2_SECRET_ACCESS_KEY
-npx wrangler secret put R2_ACCOUNT_ID
+npm run dev
 ```
 
-### 5. Deploy
+This will start a local server that emulates the Cloudflare Workers environment. You will also need to create a `.dev.vars` file in the project root to configure your local Cloudflare resources (R2, KV, D1).
+
+### Building and Deploying
+
+To build the application and deploy it to Cloudflare, run:
 
 ```bash
-npx wrangler deploy
+npm run deploy
 ```
+
+This will bundle the Worker and deploy it to your Cloudflare account.
+
+### Building CSS
+
+The project uses Tailwind CSS for styling. To build the CSS, run:
+
+```bash
+npm run build:css
+# npx @tailwindcss/cli -i ./input.css -o ./public/tailwind.css --minify
+```
+
+## Development Conventions
+
+- **Code Style**: The project uses Prettier for code formatting. You can format the code by running `npx prettier --write .`.
+- **Type Checking**: The project is written in TypeScript. You can run the type checker with `npx tsc`.
+- **API**: The API is built with the Hono web framework. Routes are defined in `src/index.ts`, and the handlers are in the `src/api` directory.
+- **Authentication**: Admin routes are protected with Cloudflare Access. The `authenticateUser` middleware in `src/index.ts` handles JWT validation.
+- **Configuration**: The application is configured through `wrangler.jsonc` and environment variables. For local development, secrets are managed in a `.dev.vars` file.
 
 ## Configuration
 
@@ -184,7 +175,7 @@ R2_ACCOUNT_ID="<CLOUDFLARE_ACCOUNT_ID>"
 R2_S3_ENDPOINT="<R2_S3_API_ENDPOINT_URL>"
 CF-Access-Client-Id="<ACCESS_SERVICE_TOKEN_CLIENT_ID>"
 CF-Access-Client-Secret="<ACCESS_SERVICE_TOKEN_CLIENT_SECRET>"
-"ENVIRONMENT": "development"
+ENVIRONMENT: "development"
 ```
 
 ## Metadata mapping (what is stored where)
@@ -211,7 +202,6 @@ This codebase stores metadata both on the R2 object (`customMetadata`) and in Wo
   - `file:<fileId>` — final metadata record written at completion (fields mirror those above plus `r2Key`, `r2ETag`, and `size`)
 
 - **List behavior**
-
   - Listing endpoints read R2 `customMetadata` first (fresh), then `file:<fileId>` in KV as fallback. This ensures up-to-date visibility and robust behavior if R2 was temporarily unavailable.
 
 ## Security Checklist
@@ -342,39 +332,44 @@ The admin dashboard shows:
 - **Public/Hidden**: Visibility status
 - **Storage Usage**: With progress bar
 
-## Development
-
-### Frontend Development
-
-Update styles:
-
-```bash
-npx npx @tailwindcss/cli -i ./input.css -o ./public/tailwind.css --minify
-```
-
-### Local Development
-
-```bash
-npx wrangler dev
-```
-
 ### File Structure
 
 ```
 ├── public/              	# Static assets
-│   ├── index.html       	# Landing page
-│   ├── admin.html       	# Admin dashboard
-│   ├── download.html    	# File browser
-│   └── tailwind.css     	# Compiled styles
-├── src/                 	# Worker source code
-│   ├── index.ts         	# Main worker
-│   ├── types.ts         	# TypeScript types
-│   └── api/             	# API handlers
-│       ├── upload.ts    	# File upload logic
-│       ├── upload-tus.ts	# File resumable upload logic (tus.io)
+│   ├── admin.html       	# Admin dashboard HTML
+│   ├── download.html    	# File download page HTML
+│   ├── favicon.ico      	# Favicon
+│   ├── favicon.png      	# Favicon
+│   ├── index.html       	# Landing page HTML
+│   ├── logo.png         	# Project logo
+│   ├── tailwind.css     	# Compiled Tailwind CSS
+│   ├── images/          	# Images used in the frontend
+│   │   ├── admin-dashboard.png
+│   │   ├── file-manager-public.png
+│   │   └── file-manager.png
+│   └── js/              	# Frontend JavaScript files
+│       ├── admin.js     	# Admin dashboard JavaScript
+│       └── download.js  	# Download page JavaScript
+├── src/                 	# Cloudflare Worker source code
+│   ├── index.ts         	# Main Worker entry point and API routes
+│   ├── types.ts         	# TypeScript type definitions
+│   └── api/             	# API handler modules
 │       ├── download.ts  	# File download logic
-│       └── list.ts      	# File listing logic
-└── wrangler.jsonc       	# Worker configuration
+│       ├── list.ts      	# File listing logic
+│       ├── upload-tus.ts	# TUS resumable upload logic
+│       └── upload.ts    	# Legacy multipart upload logic
+├── .editorconfig        	# Editor configuration
+├── .gitignore           	# Git ignore rules
+├── .prettierrc          	# Prettier configuration
+├── 1_create_user_roles.sql # D1 database schema for user roles
+├── input.css            	# Tailwind CSS input file
+├── LICENSE              	# Project license
+├── package.json         	# Project dependencies and scripts
+├── README.md            	# Project README file
+├── tailwind.config.js   	# Tailwind CSS configuration
+├── tsconfig.json        	# TypeScript configuration
+├── worker-configuration.d.ts # Worker type definitions
+└── wrangler.jsonc       	# Cloudflare Wrangler configuration
 ```
 
 ## Inspirations

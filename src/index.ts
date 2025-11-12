@@ -1,9 +1,9 @@
 // src/index.ts
-import { Hono } from 'hono';
+import { Hono, type HonoRequest, type Next } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
 import { cors } from 'hono/cors';
-import type { Env } from './types';
+import type { Env, User } from './types';
 
 import { handleUpload } from './api/upload';
 import { handleList, handleAdminList, cleanupExpiredFiles } from './api/list';
@@ -16,490 +16,251 @@ import {
 	handleTusOptions,
 } from './api/upload-tus';
 
-/**
- * RBAC + TUS-enabled Hono worker with:
- * - optionalAuthenticate: does NOT require token; sets user to 'public' if no token provided.
- * - authenticateUser: strict; requires valid token (used for protected endpoints).
- * - D1-backed role lookup fallback (ROLES_DB binding) when roles are not present inside the JWT.
- */
+// --- UTILITY FUNCTIONS ---
 
-// Helper: decode JWT payload safely
-function decodeJwtPayload(token: string | null) {
-	if (!token) return null;
+function decodeJwtPayload(token: string) {
 	try {
 		const parts = token.split('.');
 		if (parts.length !== 3) return null;
 		const payloadB64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
 		const pad = payloadB64.length % 4;
 		const padded = pad ? payloadB64 + '='.repeat(4 - pad) : payloadB64;
-		// atob available in Workers
 		const decoded = atob(padded);
 		return JSON.parse(decoded);
 	} catch (err) {
+		console.error('Failed to decode JWT payload:', err);
 		return null;
 	}
 }
 
-// D1-backed role lookup (fallback)
-async function getUserRolesFromD1(env: Env | unknown, email: string): Promise<string[]> {
+function getJwt(req: HonoRequest): string | null {
+	const fromHeader = req.header('cf-access-jwt-assertion');
+	if (fromHeader) return fromHeader;
+
+	const cookie = req.header('cookie') || '';
+	const match = cookie.match(/CF_Authorization=([^;]+)/);
+	if (match?.[1]) return decodeURIComponent(match[1]);
+
+	return null;
+}
+
+async function getUserRolesFromD1(env: Env, email: string): Promise<string[]> {
+	if (!env.ROLES_DB || !email) return ['user'];
 	try {
-		const d1 = (env as any).ROLES_DB;
-		if (!d1 || !email) return ['user'];
+		const stmt = env.ROLES_DB.prepare('SELECT roles FROM user_roles WHERE email = ?1 LIMIT 1');
+		const row = await stmt.bind(email).first<{ roles: string | string[] }>();
 
-		// Prepare & execute query. The D1 API varies between SDK versions;
-		// this uses the D1 `prepare().bind().first()` pattern used in many examples.
-		const stmt = d1.prepare('SELECT roles FROM user_roles WHERE email = ? LIMIT 1');
-		const row = await stmt.bind(email).first();
-		if (!row) return ['user'];
+		if (!row?.roles) return ['user'];
 
-		const raw = row.roles;
-		if (!raw) return ['user'];
-
-		if (typeof raw === 'string') {
-			// Try JSON array
+		if (typeof row.roles === 'string') {
 			try {
-				const parsed = JSON.parse(raw);
-				if (Array.isArray(parsed)) return parsed.map(String);
+				const parsed = JSON.parse(row.roles);
+				return Array.isArray(parsed) ? parsed.map(String) : [String(row.roles)];
 			} catch {
-				// fallback to CSV
-				const parts = raw
+				return row.roles
 					.split(',')
 					.map((s) => s.trim())
 					.filter(Boolean);
-				if (parts.length) return parts;
-				return [raw.trim()];
 			}
-		} else if (Array.isArray(raw)) {
-			return raw.map(String);
-		} else {
-			return [String(raw)];
 		}
+		return Array.isArray(row.roles) ? row.roles.map(String) : ['user'];
 	} catch (err) {
-		console.warn('D1 role lookup failed', err);
+		console.warn(`D1 role lookup for ${email} failed:`, err);
 		return ['user'];
 	}
-	// safety
-	return ['user'];
 }
 
-type User = {
-	email: string;
-	sub: string;
-	roles: string[];
-	raw: any;
-};
+// --- MIDDLEWARE ---
 
-const app = new Hono<{ Bindings: Env; Variables: { user?: User } }>();
+const app = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 
-// CORS (adjust origin in production)
-app.use(
-	'*',
-	cors({
-		origin: '*',
+app.use('*', async (c, next) => {
+	const defaultOrigin = 'https://files.automatic-demo.com';
+	const appUrl = c.env.APP_URL;
+	const isProduction = c.env.ENVIRONMENT === 'production';
+
+	let origin = defaultOrigin;
+	if (appUrl) {
+		try {
+			origin = new URL(appUrl).origin;
+		} catch {
+			console.warn(`Invalid APP_URL: "${appUrl}". Falling back to default origin.`);
+		}
+	} else if (isProduction) {
+		console.warn('APP_URL is not set in production. CORS may be too restrictive.');
+	}
+
+	const corsMiddleware = cors({
+		origin: isProduction ? origin : '*',
 		allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
 		allowHeaders: [
 			'Content-Type',
 			'Authorization',
 			'cf-access-jwt-assertion',
-			'Cookie',
 			'Tus-Resumable',
 			'Upload-Length',
 			'Upload-Metadata',
 			'Upload-Offset',
 		],
-	})
-);
+		exposeHeaders: ['Location', 'Tus-Resumable', 'Tus-Upload-Offset'],
+	});
 
-/**
- * optionalAuthenticate:
- * - If token present and valid -> sets user (email, sub, roles).
- * - If no token -> sets a lightweight public user { email: 'public', roles: ['public'] }.
- * This allows public endpoints (/api/list, /api/download) to function without auth.
- */
+	await corsMiddleware(c, next);
+});
+
+app.use('*', async (c, next) => {
+	await next();
+	const headers = {
+		'X-Frame-Options': 'SAMEORIGIN',
+		'X-Content-Type-Options': 'nosniff',
+		'Referrer-Policy': 'no-referrer',
+		'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
+		'Content-Security-Policy':
+			"default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
+	};
+	for (const [key, value] of Object.entries(headers)) {
+		c.header(key, value);
+	}
+});
+
+const PUBLIC_USER: User = { email: 'public', sub: 'public', roles: ['public'], raw: null };
+
 const optionalAuthenticate = createMiddleware(async (c, next) => {
-	let token = c.req.header('cf-access-jwt-assertion') || '';
-
-	if (!token) {
-		const cookie = c.req.header('cookie') || '';
-		const m = cookie.match(/CF_Authorization=([^;]+)/);
-		if (m) token = decodeURIComponent(m[1]);
-	}
-
-	if (!token) {
-		// No token — treat as public user
-		const publicUser: User = {
-			email: 'public',
-			sub: '',
-			roles: ['public'],
-			raw: null,
-		};
-		c.set('user', publicUser);
-		await next();
-		return;
-	}
-
-	try {
-		const payload = decodeJwtPayload(token);
-		if (!payload) {
-			// token present but invalid -> treat as unauthenticated (public)
-			const publicUser: User = {
-				email: 'public',
-				sub: '',
-				roles: ['public'],
-				raw: null,
-			};
-			c.set('user', publicUser);
-			await next();
-			return;
-		}
-
-		// Optional expiry check in production
-		if (c.env.ENVIRONMENT === 'production') {
-			if (payload.exp && typeof payload.exp === 'number') {
-				const now = Math.floor(Date.now() / 1000);
-				if (payload.exp < now) {
-					// expired: treat as public
-					const publicUser: User = {
-						email: 'public',
-						sub: '',
-						roles: ['public'],
-						raw: null,
-					};
-					c.set('user', publicUser);
-					await next();
-					return;
-				}
-			}
-		}
-
-		const email = String(payload.email || payload.upn || payload.sub || 'unknown');
-
-		let roles: string[] = [];
-		if (Array.isArray(payload.roles) && payload.roles.length) {
-			roles = payload.roles.map(String);
-		} else {
-			roles = await getUserRolesFromD1(c.env as Env, email);
-		}
-
-		const user: User = {
+	// In development, allow using a mock user defined in .dev.vars to bypass JWT validation.
+	if (c.env.ENVIRONMENT !== 'production' && c.env.DEV_USER_EMAIL) {
+		const email = c.env.DEV_USER_EMAIL;
+		const roles = c.env.DEV_USER_ROLES ? c.env.DEV_USER_ROLES.split(',').map((s: string) => s.trim()) : ['admin', 'sme', 'user'];
+		c.set('user', {
 			email,
-			sub: String(payload.sub || ''),
+			sub: 'dev-user',
 			roles,
-			raw: payload,
-		};
-		c.set('user', user);
-		await next();
-	} catch (err) {
-		console.error('optionalAuthenticate error:', err);
-		// fallback to public user
-		const publicUser: User = {
-			email: 'public',
-			sub: '',
-			roles: ['public'],
-			raw: null,
-		};
-		c.set('user', publicUser);
-		await next();
+			raw: { note: 'This is a mock user for development. Authentication is bypassed.' },
+		});
+		return await next();
 	}
+
+	const token = getJwt(c.req);
+	if (!token) {
+		c.set('user', PUBLIC_USER);
+		return next();
+	}
+
+	const payload = decodeJwtPayload(token);
+	if (!payload) {
+		c.set('user', PUBLIC_USER);
+		return next();
+	}
+
+	if (c.env.ENVIRONMENT === 'production' && payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+		c.set('user', PUBLIC_USER);
+		return next();
+	}
+
+	const email = String(payload.email || payload.upn || payload.sub || 'unknown');
+	const roles =
+		Array.isArray(payload.roles) && payload.roles.length > 0 ? payload.roles.map(String) : await getUserRolesFromD1(c.env, email);
+
+	c.set('user', { email, sub: String(payload.sub || ''), roles, raw: payload });
+	await next();
 });
 
-/**
- * authenticateUser - strict middleware (throws 401 if no valid token)
- */
 const authenticateUser = createMiddleware(async (c, next) => {
-	let token = c.req.header('cf-access-jwt-assertion') || '';
-
-	if (!token) {
-		const cookie = c.req.header('cookie') || '';
-		const m = cookie.match(/CF_Authorization=([^;]+)/);
-		if (m) token = decodeURIComponent(m[1]);
-	}
-
-	if (!token) throw new HTTPException(401, { message: 'No authentication token found' });
-
-	try {
-		const payload = decodeJwtPayload(token);
-		if (!payload) throw new HTTPException(401, { message: 'Invalid token format' });
-
-		// expiry check in production
-		if (c.env.ENVIRONMENT === 'production') {
-			if (payload.exp && typeof payload.exp === 'number') {
-				const now = Math.floor(Date.now() / 1000);
-				if (payload.exp < now) throw new HTTPException(401, { message: 'Token expired' });
-			}
-		}
-
-		const email = String(payload.email || payload.upn || payload.sub || 'unknown');
-
-		let roles: string[] = [];
-		if (Array.isArray(payload.roles) && payload.roles.length) {
-			roles = payload.roles.map(String);
-		} else {
-			roles = await getUserRolesFromD1(c.env as Env, email);
-		}
-
-		const user: User = {
+	// In development, allow using a mock user defined in .dev.vars to bypass JWT validation.
+	if (c.env.ENVIRONMENT !== 'production' && c.env.DEV_USER_EMAIL) {
+		const email = c.env.DEV_USER_EMAIL;
+		const roles = c.env.DEV_USER_ROLES ? c.env.DEV_USER_ROLES.split(',').map((s: string) => s.trim()) : ['admin', 'sme', 'user'];
+		c.set('user', {
 			email,
-			sub: String(payload.sub || ''),
+			sub: 'dev-user',
 			roles,
-			raw: payload,
-		};
-		c.set('user', user);
-		await next();
-	} catch (err) {
-		console.error('Authentication error', err);
-		if (err instanceof HTTPException) throw err;
-		throw new HTTPException(401, { message: 'Invalid authentication token' });
+			raw: { note: 'This is a mock user for development. Authentication is bypassed.' },
+		});
+		return await next();
 	}
+
+	const token = getJwt(c.req);
+	if (!token) {
+		// For development, provide a more helpful error message.
+		if (c.env.ENVIRONMENT !== 'production') {
+			throw new HTTPException(401, {
+				message:
+					'Authentication token not found. In development, you can bypass this by setting DEV_USER_EMAIL and optionally DEV_USER_ROLES in your .dev.vars file.',
+			});
+		}
+		throw new HTTPException(401, { message: 'Authentication token not found' });
+	}
+
+	const payload = decodeJwtPayload(token);
+	if (!payload) throw new HTTPException(401, { message: 'Invalid token format' });
+
+	if (c.env.ENVIRONMENT === 'production' && payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+		throw new HTTPException(401, { message: 'Token has expired' });
+	}
+
+	const email = String(payload.email || payload.upn || payload.sub || 'unknown');
+	const roles =
+		Array.isArray(payload.roles) && payload.roles.length > 0 ? payload.roles.map(String) : await getUserRolesFromD1(c.env, email);
+
+	c.set('user', { email, sub: String(payload.sub || ''), roles, raw: payload });
+	await next();
 });
 
-// Minimal role-checking middleware factory
 const requireRole = (required: string | string[]) => {
-	const reqRoles = Array.isArray(required) ? required : [required];
+	const requiredRoles = Array.isArray(required) ? required : [required];
 	return createMiddleware(async (c, next) => {
-		const user = c.get('user') as { roles?: string[] } | undefined;
-		if (!user || !user.roles) throw new HTTPException(401, { message: 'User not authenticated' });
-		const allowed = reqRoles.some((r) => (user.roles || []).includes(r));
-		if (!allowed) throw new HTTPException(403, { message: `Access denied. Required: ${reqRoles.join(', ')}` });
+		const user = c.get('user');
+		if (!user || !user.roles.some((role: string) => requiredRoles.includes(role))) {
+			throw new HTTPException(403, { message: `Access denied. Required role: ${requiredRoles.join(' or ')}` });
+		}
 		await next();
 	});
 };
 
-// --- Routes ---
-// Public health
-app.get('/', (c) => c.text('File Sharing Worker Running'));
+// --- ROUTES ---
 
-// Public listing endpoint - optional authentication so "public" users can view unrestricted files
-app.get('/api/list', optionalAuthenticate, async (c) => {
-	try {
-		// pass caller so list can enforce `requiredRole` per-file
-		const caller = c.get('user');
-		const result = await handleList(c.req.raw, c.env, caller);
-		return c.json(result, result.success ? 200 : 400);
-	} catch (err) {
-		console.error('List error', err);
-		return c.json({ success: false, error: 'Internal server error' }, 500);
-	}
-});
+app.get('/', (c) => c.text('File Sharing Worker is running.'));
 
-// Download endpoint - optional authentication so public files can be downloaded
-app.get('/api/download/:fileId', optionalAuthenticate, async (c) => {
-	try {
-		const fileId = c.req.param('fileId');
-		const caller = c.get('user');
-		return await handleDownload(c.req.raw, c.env, fileId, caller);
-	} catch (err) {
-		console.error('Download error', err);
-		return c.text('Internal server error', 500);
-	}
-});
+const publicApi = new Hono<{ Bindings: Env; Variables: { user?: User } }>();
+publicApi.use('*', optionalAuthenticate);
+publicApi.get('/list', (c) => handleList(c));
+publicApi.get('/download/:fileId', (c) => handleDownload(c));
 
-// Debug endpoint - strict auth (useful to debug cookies/headers)
-app.get('/api/debug/jwt', authenticateUser, (c) => {
-	try {
-		let token = c.req.header('cf-access-jwt-assertion') || null;
-		if (!token) {
-			const cookie = c.req.header('cookie') || '';
-			const m = cookie.match(/CF_Authorization=([^;]+)/);
-			token = m?.[1] ? decodeURIComponent(m[1]) : null;
-		}
+const authApi = new Hono<{ Bindings: Env; Variables: { user: User } }>();
+authApi.use('*', authenticateUser);
 
-		let jwtPayload: any = null;
-		if (token) {
-			try {
-				jwtPayload = decodeJwtPayload(token);
-			} catch (e) {
-				jwtPayload = { error: 'Failed to decode JWT' };
-			}
-		}
-
-		return c.json({
-			success: true,
-			headerPresent: !!c.req.header('cf-access-jwt-assertion'),
-			cookiePresent: !!c.req.header('cookie'),
-			extractedUser: c.get('user'),
-			rawJwtPayload: jwtPayload,
-		});
-	} catch (err) {
-		console.error('JWT debug error', err);
-		return c.json({ success: false, error: 'Failed to parse JWT' }, 500);
-	}
-});
-
-// Legacy multipart upload (admin/sme allowed; handler should enforce inside or via route-level requireRole)
-app.post('/api/admin/upload', authenticateUser, async (c) => {
-	try {
-		const result = await handleUpload(c.req.raw, c.env);
-		return c.json(result, result.success ? 200 : 400);
-	} catch (err) {
-		console.error('Legacy upload error', err);
-		return c.json({ success: false, error: 'Internal server error' }, 500);
-	}
-});
-
-// Admin-only list and cleanup
-app.get('/api/admin/list', authenticateUser, requireRole('admin'), async (c) => {
-	try {
-		const caller = c.get('user');
-		const result = await handleAdminList(c.req.raw, c.env, caller);
-		return c.json(result, result.success ? 200 : 400);
-	} catch (err) {
-		console.error('Admin list error', err);
-		return c.json({ success: false, error: 'Internal server error' }, 500);
-	}
-});
-
-app.post('/api/admin/cleanup', authenticateUser, requireRole('admin'), async (c) => {
-	try {
-		const result = await cleanupExpiredFiles(c.env);
-		return c.json(result, result.success ? 200 : 400);
-	} catch (err) {
-		console.error('Cleanup error', err);
-		return c.json({ success: false, error: 'Internal server error', deletedCount: 0 }, 500);
-	}
-});
-
-app.get('/api/admin/r2-info', authenticateUser, requireRole('admin'), (c) => {
-	const accountId = c.env.R2_ACCOUNT_ID;
-	const bucketName = c.env.R2_BUCKET_NAME;
-	if (!accountId || !bucketName) {
-		return c.json({ success: false, error: 'Missing R2 info' }, 500);
-	}
+authApi.get('/debug/jwt', (c) => c.json({ success: true, extractedUser: c.get('user'), rawJwtPayload: c.get('user').raw }));
+authApi.post('/admin/upload', requireRole(['admin', 'sme']), (c) => handleUpload(c));
+authApi.get('/admin/list', requireRole('admin'), (c) => handleAdminList(c));
+authApi.post('/admin/cleanup', requireRole('admin'), (c) => cleanupExpiredFiles(c));
+authApi.get('/admin/r2-info', requireRole('admin'), (c) => {
+	const { R2_ACCOUNT_ID: accountId, R2_BUCKET_NAME: bucketName } = c.env;
+	if (!accountId || !bucketName) throw new HTTPException(500, { message: 'R2 configuration is missing' });
 	return c.json({ success: true, accountId, bucketName });
 });
 
-// --- TUS endpoints ---
-// OPTIONS top-level (client capability negotiation) - allow public to probe capabilities
-app.options('/api/upload/tus', async (c) => {
-	try {
-		const resp = await handleTusOptions(c.req.raw);
-		const base = resp instanceof Response ? resp : new Response('', { status: 204 });
-		base.headers.set('Tus-Resumable', '1.0.0');
-		base.headers.set('Access-Control-Allow-Origin', c.req.header('Origin') || '*');
-		base.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS, HEAD, PATCH, DELETE');
-		base.headers.set(
-			'Access-Control-Allow-Headers',
-			'Tus-Resumable, Upload-Length, Upload-Offset, Upload-Metadata, Content-Type, cf-access-jwt-assertion'
-		);
-		return base;
-	} catch (err) {
-		console.error('TUS OPTIONS error', err);
-		return new Response('Internal server error', { status: 500, headers: { 'Tus-Resumable': '1.0.0' } });
-	}
-});
+authApi.post('/upload/tus', requireRole(['admin', 'sme']), (c) => handleTusUploadCreation(c));
+authApi.patch('/upload/tus/:fileId', requireRole(['admin', 'sme']), (c) => handleTusUploadChunk(c));
+authApi.on('HEAD', '/upload/tus/:fileId', requireRole(['admin', 'sme']), (c) => handleTusUploadHead(c));
+authApi.delete('/upload/tus/:fileId', requireRole(['admin', 'sme']), (c) => handleTusUploadDelete(c));
 
-// Create upload (POST) - require authentication (uploader must be identifiable)
-app.post('/api/upload/tus', authenticateUser, async (c) => {
-	try {
-		const resp = await handleTusUploadCreation(c.req.raw, c.env);
-		if (resp instanceof Response) {
-			resp.headers.set('Tus-Resumable', '1.0.0');
-			return resp;
-		}
-		const result = resp as { success?: boolean };
-		return new Response(JSON.stringify(result), {
-			status: result && result.success ? 201 : 400,
-			headers: { 'content-type': 'application/json', 'Tus-Resumable': '1.0.0' },
-		});
-	} catch (err) {
-		console.error('TUS creation fatal', err);
-		return new Response('Internal server error', {
-			status: 500,
-			headers: { 'Access-Control-Allow-Origin': '*', 'Tus-Resumable': '1.0.0' },
-		});
-	}
-});
+app.options('/api/upload/tus', handleTusOptions);
+app.options('/api/upload/tus/:fileId', handleTusOptions);
 
-// OPTIONS for resource - allow public
-app.options('/api/upload/tus/:fileId', async (c) => {
-	try {
-		const resp = await handleTusOptions(c.req.raw);
-		const base = resp instanceof Response ? resp : new Response('', { status: 204 });
-		base.headers.set('Tus-Resumable', '1.0.0');
-		base.headers.set('Access-Control-Allow-Origin', c.req.header('Origin') || '*');
-		base.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS, HEAD, PATCH, DELETE');
-		base.headers.set(
-			'Access-Control-Allow-Headers',
-			'Tus-Resumable, Upload-Length, Upload-Offset, Upload-Metadata, Content-Type, cf-access-jwt-assertion'
-		);
-		return base;
-	} catch (err) {
-		console.error('TUS OPTIONS (file) error', err);
-		return new Response('Internal server error', { status: 500, headers: { 'Tus-Resumable': '1.0.0' } });
-	}
-});
+app.route('/api', publicApi);
+app.route('/api', authApi);
 
-// PATCH chunk - require auth (only uploader / authorized user should append)
-app.patch('/api/upload/tus/:fileId', authenticateUser, async (c) => {
-	try {
-		const fileId = c.req.param('fileId');
-		const resp = (await handleTusUploadChunk(c.req.raw, c.env, fileId)) as { success?: boolean } | Response;
-		if (resp instanceof Response) {
-			resp.headers.set('Tus-Resumable', '1.0.0');
-			return resp;
-		}
-		const success = typeof resp === 'object' && resp !== null && 'success' in resp ? (resp as any).success : false;
-		return new Response(JSON.stringify(resp), {
-			status: success ? 200 : 400,
-			headers: { 'content-type': 'application/json', 'Tus-Resumable': '1.0.0' },
-		});
-	} catch (err) {
-		console.error('TUS PATCH fatal', err);
-		return new Response('Internal server error', {
-			status: 500,
-			headers: { 'Access-Control-Allow-Origin': '*', 'Tus-Resumable': '1.0.0' },
-		});
-	}
-});
-
-// HEAD - require auth (uploader or authorized agent)
-app.on('HEAD', '/api/upload/tus/:fileId', authenticateUser, async (c) => {
-	try {
-		const fileId = c.req.param('fileId');
-		const resp = (await handleTusUploadHead(c.req.raw, c.env, fileId)) as { success?: boolean } | Response;
-		if (resp instanceof Response) {
-			resp.headers.set('Tus-Resumable', '1.0.0');
-			return resp;
-		}
-		return new Response('', { status: resp && resp.success ? 200 : 404, headers: { 'Tus-Resumable': '1.0.0' } });
-	} catch (err) {
-		console.error('TUS HEAD fatal', err);
-		return new Response('Internal server error', {
-			status: 500,
-			headers: { 'Access-Control-Allow-Origin': '*', 'Tus-Resumable': '1.0.0' },
-		});
-	}
-});
-
-// DELETE - require auth
-app.delete('/api/upload/tus/:fileId', authenticateUser, async (c) => {
-	try {
-		const fileId = c.req.param('fileId');
-		const resp = await handleTusUploadDelete(c.req.raw, c.env, fileId);
-		if (resp instanceof Response) {
-			resp.headers.set('Tus-Resumable', '1.0.0');
-			return resp;
-		}
-		return new Response(JSON.stringify(resp), {
-			status: typeof resp === 'object' && resp !== null && 'success' in resp && (resp as any).success ? 200 : 400,
-			headers: { 'content-type': 'application/json', 'Tus-Resumable': '1.0.0' },
-		});
-	} catch (err) {
-		console.error('TUS DELETE fatal', err);
-		return new Response('Internal server error', {
-			status: 500,
-			headers: { 'Access-Control-Allow-Origin': '*', 'Tus-Resumable': '1.0.0' },
-		});
-	}
-});
-
-// Generic error handler
 app.onError((err, c) => {
-	console.error('Worker error', err);
 	if (err instanceof HTTPException) {
-		return c.json({ error: err.message, status: err.status }, err.status);
+		// HTTPExceptions are controlled errors. We'll log server errors but not client errors.
+		if (err.status >= 500) {
+			console.error(`Server error: ${err.message}`);
+		}
+		return err.getResponse();
 	}
-	return c.json({ error: 'Internal server error' }, 500);
+
+	// For unexpected errors, log the full error.
+	console.error('Unhandled error:', err);
+	return c.json({ success: false, error: 'Internal Server Error' }, 500);
 });
 
 export default app;

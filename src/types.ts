@@ -14,7 +14,8 @@ export interface Env {
 	// Limits and environment flags (string because Wrangler env vars are strings)
 	MAX_TOTAL_FILE_SIZE?: number; // in bytes
 	MAX_DIRECT_UPLOAD?: string;
-	ENVIRONMENT?: string;
+	ENVIRONMENT?: 'production' | 'development' | string;
+	APP_URL?: string;
 
 	// Optional R2 credentials for generating signed URLs (only needed if you create signed links server-side)
 	R2_ACCESS_KEY_ID?: string;
@@ -26,13 +27,10 @@ export interface Env {
 	ROLES_DB?: D1Database; // D1 binding
 }
 
-export type UserRole = 'admin' | 'sme' | 'user';
-
 // User object stored in request context by auth middleware
 export interface User {
 	email: string;
-	name?: string;
-	groups?: string[];
-	role?: UserRole;
-	raw?: any; // Raw JWT payload
+	sub: string;
+	roles: string[];
+	raw: any; // Raw JWT payload
 }
