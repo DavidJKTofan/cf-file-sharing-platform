@@ -22,7 +22,36 @@
 		}
 	],
 	"workers_dev": false,
-	// Define production environment-specific variables
+	// TOP-LEVEL BINDINGS (used for default production deployments)
+	"kv_namespaces": [
+		{
+			"binding": "FILE_METADATA",
+			"id": "ee66296fba274991a379d269f67a50e6"
+		}
+	],
+	"r2_buckets": [
+		{
+			"bucket_name": "file-sharing-platform-files",
+			"binding": "R2_FILES"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "ROLES_DB",
+			"database_name": "file-sharing-platform-user-roles",
+			"database_id": "a1c8373e-8ede-4286-ad6d-e72d2cbccc8c"
+		}
+	],
+	"vars": {
+		"MAX_DIRECT_UPLOAD": "100000000",
+		"MAX_TOTAL_FILE_SIZE": "5000000000",
+		"R2_BUCKET_NAME": "file-sharing-platform-files",
+		"ENVIRONMENT": "production",
+		"APP_URL": "https://files.automatic-demo.com",
+		"DEV_USER_EMAIL": "",
+		"DEV_USER_ROLES": ""
+	},
+	// NAMED ENVIRONMENTS
 	"env": {
 		"development": {
 			"kv_namespaces": [
@@ -42,48 +71,16 @@
 					"binding": "ROLES_DB",
 					"database_name": "file-sharing-platform-user-roles",
 					"database_id": "a1c8373e-8ede-4286-ad6d-e72d2cbccc8c"
-					// "remote": true,
 				}
 			],
 			"vars": {
-				"MAX_DIRECT_UPLOAD": "100000000", // 100MB threshold for multipart uploads
-				"MAX_TOTAL_FILE_SIZE": "5000000000", // 5GB maximum allowed total file size upload
+				"MAX_DIRECT_UPLOAD": "100000000",
+				"MAX_TOTAL_FILE_SIZE": "5000000000",
 				"R2_BUCKET_NAME": "file-sharing-platform-files",
 				"ENVIRONMENT": "development",
 				"DEV_USER_ROLES": "admin, sme, user",
 				"DEV_USER_EMAIL": "example@example.com",
 				"APP_URL": "http://localhost:8787"
-			}
-		},
-		"production": {
-			"kv_namespaces": [
-				{
-					"binding": "FILE_METADATA",
-					"id": "ee66296fba274991a379d269f67a50e6"
-				}
-			],
-			"r2_buckets": [
-				{
-					"bucket_name": "file-sharing-platform-files",
-					"binding": "R2_FILES"
-				}
-			],
-			"d1_databases": [
-				{
-					"binding": "ROLES_DB",
-					"database_name": "file-sharing-platform-user-roles",
-					"database_id": "a1c8373e-8ede-4286-ad6d-e72d2cbccc8c"
-					// "remote": true,
-				}
-			],
-			"vars": {
-				"MAX_DIRECT_UPLOAD": "100000000", // 100MB threshold for multipart uploads
-				"MAX_TOTAL_FILE_SIZE": "5000000000", // 5GB maximum allowed total file size upload
-				"R2_BUCKET_NAME": "file-sharing-platform-files",
-				"ENVIRONMENT": "production",
-				"APP_URL": "https://files.automatic-demo.com",
-				"DEV_USER_EMAIL": "",
-				"DEV_USER_ROLES": ""
 			}
 		}
 	}

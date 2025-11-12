@@ -249,18 +249,33 @@ app.options('/api/upload/tus/:fileId', handleTusOptions);
 app.route('/api', publicApi);
 app.route('/api', authApi);
 
+// FIXED ERROR HANDLER - Returns JSON responses
 app.onError((err, c) => {
 	if (err instanceof HTTPException) {
-		// HTTPExceptions are controlled errors. We'll log server errors but not client errors.
+		// Log server errors (5xx) but not client errors (4xx)
 		if (err.status >= 500) {
-			console.error(`Server error: ${err.message}`);
+			console.error(`Server error: ${err.message}`, err);
 		}
-		return err.getResponse();
+
+		// Return JSON response for all HTTPExceptions
+		return c.json(
+			{
+				success: false,
+				error: err.message || 'An error occurred',
+			},
+			err.status
+		);
 	}
 
-	// For unexpected errors, log the full error.
+	// For unexpected errors, log the full error and return JSON
 	console.error('Unhandled error:', err);
-	return c.json({ success: false, error: 'Internal Server Error' }, 500);
+	return c.json(
+		{
+			success: false,
+			error: 'Internal Server Error',
+		},
+		500
+	);
 });
 
 export default app;
