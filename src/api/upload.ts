@@ -1,12 +1,21 @@
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
-import { AwsClient } from 'aws4fetch';
+import { z } from 'zod';
 import type { Env, User } from '../types';
 
-// ... (interfaces and constants remain the same)
+const uploadFormSchema = z.object({
+	file: z.instanceof(File),
+	description: z.string().optional(),
+	tags: z.string().optional(),
+	expiration: z.string().optional(),
+	checksum: z.string().optional(),
+	hideFromList: z.string().transform((s) => s.toLowerCase() === 'true').optional(),
+	requiredRole: z.string().optional(),
+});
 
 export async function handleUpload(c: Context<{ Bindings: Env; Variables: { user: User } }>): Promise<Response> {
 	const { req, env } = c;
+	const { config } = env;
 
 	const contentType = req.header('content-type') || '';
 	if (!contentType.includes('multipart/form-data')) {
@@ -14,23 +23,27 @@ export async function handleUpload(c: Context<{ Bindings: Env; Variables: { user
 	}
 
 	const formData = await req.formData();
-	const file = formData.get('file');
+	const validated = uploadFormSchema.safeParse({
+		file: formData.get('file'),
+		description: formData.get('description'),
+		tags: formData.get('tags'),
+		expiration: formData.get('expiration'),
+		checksum: formData.get('checksum'),
+		hideFromList: formData.get('hideFromList'),
+		requiredRole: formData.get('requiredRole'),
+	});
 
-	if (!(file instanceof File)) {
-		throw new HTTPException(400, { message: 'A valid file is required.' });
+	if (!validated.success) {
+		throw new HTTPException(400, { message: 'Invalid form data', cause: validated.error });
 	}
 
-	const maxSize = env.MAX_TOTAL_FILE_SIZE || 100 * 1024 * 1024; // Default 100MB
-	if (file.size > maxSize) {
-		throw new HTTPException(413, { message: `File exceeds maximum allowed size of ${maxSize / 1024 / 1024}MB.` });
-	}
+	const { file, description, tags, expiration, checksum, hideFromList, requiredRole } = validated.data;
 
-	const description = (formData.get('description') as string) || '';
-	const tags = (formData.get('tags') as string) || '';
-	const expiration = (formData.get('expiration') as string) || '';
-	const checksum = (formData.get('checksum') as string) || '';
-	const hideFromList = (formData.get('hideFromList') as string)?.toLowerCase() === 'true';
-	const requiredRole = (formData.get('requiredRole') as string) || '';
+	if (file.size > config.MAX_TOTAL_FILE_SIZE) {
+		throw new HTTPException(413, {
+			message: `File exceeds maximum allowed size of ${config.MAX_TOTAL_FILE_SIZE / 1024 / 1024}MB.`,
+		});
+	}
 
 	let expirationDate: Date | null = null;
 	if (expiration) {
@@ -46,14 +59,14 @@ export async function handleUpload(c: Context<{ Bindings: Env; Variables: { user
 
 	const customMetadata: Record<string, string> = {
 		fileId,
-		description,
-		tags,
+		description: description || '',
+		tags: tags || '',
 		expiration: expirationDate ? expirationDate.toISOString() : '',
-		checksum,
+		checksum: checksum || '',
 		originalName: file.name,
 		uploadedAt: new Date().toISOString(),
-		hideFromList: String(hideFromList),
-		requiredRole,
+		hideFromList: String(hideFromList || false),
+		requiredRole: requiredRole || '',
 		uploadType: 'multipart',
 		asn: String(cf.asn || ''),
 		country: cf.country || '',
@@ -62,12 +75,8 @@ export async function handleUpload(c: Context<{ Bindings: Env; Variables: { user
 		userAgent: req.header('User-Agent') || '',
 	};
 
-	if (c.env.ENVIRONMENT === 'development') {
+	if (config.ENVIRONMENT === 'development') {
 		console.log('[DEBUG] Uploading file with metadata:', JSON.stringify(customMetadata, null, 2));
-	}
-
-	if (!env.R2_FILES) {
-		throw new HTTPException(500, { message: 'File storage is not configured.' });
 	}
 
 	await env.R2_FILES.put(objectKey, file.stream(), {
@@ -75,7 +84,7 @@ export async function handleUpload(c: Context<{ Bindings: Env; Variables: { user
 		customMetadata,
 	});
 
-	const downloadUrl = `${new URL(req.url).origin}/api/download/${fileId}`;
+	const downloadUrl = `${config.APP_URL}/api/download/${fileId}`;
 
 	const responsePayload = {
 		success: true,

@@ -1,8 +1,18 @@
-// src/api/list.ts
-import { AwsClient } from 'aws4fetch';
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
+import { z } from 'zod';
 import type { Env, User } from '../types';
+
+const listQuerySchema = z.object({
+	search: z.string().optional(),
+	limit: z.coerce.number().int().min(1).max(100).default(100),
+	cursor: z.string().optional(),
+});
+
+const adminListQuerySchema = listQuerySchema.extend({
+	includeExpired: z.preprocess((v) => String(v) !== 'false', z.boolean().default(true)),
+	includeHidden: z.preprocess((v) => String(v) !== 'false', z.boolean().default(true)),
+});
 
 interface FileListItem {
 	fileId: string;
@@ -23,22 +33,10 @@ interface FileListItem {
 
 // Public list handler - excludes hidden and expired files by default
 export async function handleList(c: Context<{ Bindings: Env; Variables: { user?: User } }>): Promise<Response> {
-	const { env, req } = c;
-	const caller = c.get('user');
-
-	if (!env.R2_FILES) {
-		throw new HTTPException(500, { message: 'File storage is not configured.' });
-	}
-
-	const url = new URL(req.url);
-	const searchQuery = url.searchParams.get('search') || '';
-	const limit = parseInt(url.searchParams.get('limit') || '100', 10);
-	const cursor = url.searchParams.get('cursor') || undefined;
+	const query = listQuerySchema.parse(c.req.query());
 
 	const result = await getFilteredFiles(c as any, {
-		searchQuery,
-		limit: Math.min(limit, 100),
-		cursor,
+		...query,
 		includeExpired: false,
 		includeHidden: false,
 	});
@@ -51,22 +49,10 @@ export async function handleList(c: Context<{ Bindings: Env; Variables: { user?:
 
 // Admin list handler - includes all files with comprehensive stats
 export async function handleAdminList(c: Context<{ Bindings: Env; Variables: { user: User } }>): Promise<Response> {
-	const { env, req } = c;
-
-	if (!env.R2_FILES) {
-		throw new HTTPException(500, { message: 'File storage is not configured.' });
-	}
-
-	const url = new URL(req.url);
-	const searchQuery = url.searchParams.get('search') || '';
-	const limit = parseInt(url.searchParams.get('limit') || '100', 10);
-	const cursor = url.searchParams.get('cursor') || undefined;
-	const includeExpired = url.searchParams.get('includeExpired') !== 'false';
-	const includeHidden = url.searchParams.get('includeHidden') !== 'false';
+	const query = adminListQuerySchema.parse(c.req.query());
 
 	// Get all files to calculate comprehensive stats
-	const allFilesResult = await getFilteredFiles(c, {
-		searchQuery: '',
+	const allFilesResult = await getFilteredFiles(c as any, {
 		limit: 1000,
 		includeExpired: true,
 		includeHidden: true,
@@ -88,13 +74,7 @@ export async function handleAdminList(c: Context<{ Bindings: Env; Variables: { u
 	};
 
 	// Get filtered files for display
-	const filteredResult = await getFilteredFiles(c, {
-		searchQuery,
-		limit: Math.min(limit, 100),
-		cursor,
-		includeExpired,
-		includeHidden,
-	});
+	const filteredResult = await getFilteredFiles(c as any, query);
 
 	return c.json({
 		success: true,
@@ -103,22 +83,18 @@ export async function handleAdminList(c: Context<{ Bindings: Env; Variables: { u
 	});
 }
 
+type GetFilteredFilesOptions = z.infer<typeof adminListQuerySchema>;
+
 // Shared function to get filtered files
 async function getFilteredFiles(
-	c: Context<{ Bindings: Env; Variables: { user: User } }>,
-	options: {
-		searchQuery: string;
-		limit: number;
-		cursor?: string;
-		includeExpired: boolean;
-		includeHidden: boolean;
-	},
+	c: Context<{ Bindings: Env; Variables: { user?: User } }>,
+	options: GetFilteredFilesOptions,
 ): Promise<{ files: FileListItem[] }> {
 	const { env } = c;
 	const caller = c.get('user');
-	const { searchQuery, limit, cursor, includeExpired, includeHidden } = options;
+	const { search, limit, cursor, includeExpired, includeHidden } = options;
 
-	if (env.ENVIRONMENT === 'development') {
+	if (env.config.ENVIRONMENT === 'development') {
 		console.log('[DEBUG] getFilteredFiles called with options:', JSON.stringify(options, null, 2));
 		console.log('[DEBUG] Caller:', JSON.stringify(caller, null, 2));
 	}
@@ -136,7 +112,7 @@ async function getFilteredFiles(
 	const isCallerAdmin = callerRoles.includes('admin');
 
 	for (const object of listResult.objects) {
-		if (env.ENVIRONMENT === 'development') {
+		if (env.config.ENVIRONMENT === 'development') {
 			console.log(`[DEBUG] Processing object: ${object.key}`, JSON.stringify(object.customMetadata, null, 2));
 		}
 		const keyParts = object.key.split('/');
@@ -152,7 +128,7 @@ async function getFilteredFiles(
 		const customMetadata = { ...object.customMetadata, ...kvMetadata };
 		const isHidden = customMetadata.hideFromList === 'true' || customMetadata.hideFromList === true;
 
-		if (isHidden && !includeHidden && !isCallerAdmin) continue;
+		if (isHidden && !includeHidden) continue;
 
 		const requiredRole = customMetadata.requiredRole || customMetadata.requiredrole;
 		if (requiredRole && !isCallerAdmin && !callerRoles.includes(requiredRole)) {
@@ -166,10 +142,10 @@ async function getFilteredFiles(
 			if (expirationDate <= now) isExpired = true;
 		}
 
-		if (isExpired && !includeExpired && !isCallerAdmin) continue;
+		if (isExpired && !includeExpired) continue;
 
 		const searchableText = `${filename} ${customMetadata.description || ''} ${customMetadata.tags || ''}`.toLowerCase();
-		if (searchQuery && !searchableText.includes(searchQuery.toLowerCase())) {
+		if (search && !searchableText.includes(search.toLowerCase())) {
 			continue;
 		}
 
@@ -202,7 +178,7 @@ export async function cleanupExpiredFiles(c: Context<{ Bindings: Env; Variables:
 		throw new HTTPException(500, { message: 'File storage is not configured.' });
 	}
 
-	if (env.ENVIRONMENT === 'development') {
+	if (env.config.ENVIRONMENT === 'development') {
 		console.log('[DEBUG] Starting cleanup of expired files.');
 	}
 
@@ -221,7 +197,7 @@ export async function cleanupExpiredFiles(c: Context<{ Bindings: Env; Variables:
 			.map((obj) => obj.key);
 
 		if (expiredKeys.length > 0) {
-			if (env.ENVIRONMENT === 'development') {
+			if (env.config.ENVIRONMENT === 'development') {
 				console.log(`[DEBUG] Deleting ${expiredKeys.length} expired files:`, expiredKeys);
 			}
 			await env.R2_FILES.delete(expiredKeys);
@@ -237,7 +213,7 @@ export async function cleanupExpiredFiles(c: Context<{ Bindings: Env; Variables:
 		cursor = listResult.truncated ? listResult.cursor : undefined;
 	} while (cursor);
 
-	if (env.ENVIRONMENT === 'development') {
+	if (env.config.ENVIRONMENT === 'development') {
 		console.log(`[DEBUG] Finished cleanup. Deleted ${deletedCount} files.`);
 	}
 

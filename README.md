@@ -154,14 +154,14 @@ npm run build:css
 
 ### Environment Variables
 
-| Name                                                                          | Required | Purpose                                                                |
-| ----------------------------------------------------------------------------- | -------: | ---------------------------------------------------------------------- |
-| `R2_FILES` (binding)                                                          |       ✅ | R2 bucket binding (object storage)                                     |
-| `FILE_METADATA` (KV binding)                                                  |       ✅ | KV for `tus:<fileId>` (in-progress) and `file:<fileId>` final metadata |
-| `ROLES_DB` (D1 binding)                                                       |       ✅ | Required D1 DB for role lookup                                         |
-| `MAX_TOTAL_FILE_SIZE`                                                         |       ⚪ | Maximum allowed file size (bytes)                                      |
-| `MAX_DIRECT_UPLOAD`                                                           |       ⚪ | Threshold for supporting legacy direct uploads                         |
-| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `R2_BUCKET_NAME` |       ✅ | Required if you generate signed R2 download URLs server-side           |
+| Name                                                        | Required | Purpose                                                                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------- | -------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `R2_FILES` (binding)                                        |       ✅ | R2 bucket binding (object storage)                                                                                                                                                                                                                                                                       |
+| `FILE_METADATA` (KV binding)                                |       ✅ | KV for `tus:<fileId>` (in-progress) and `file:<fileId>` final metadata                                                                                                                                                                                                                                   |
+| `ROLES_DB` (D1 binding)                                     |       ✅ | Required D1 DB for role lookup                                                                                                                                                                                                                                                                           |
+| `MAX_TOTAL_FILE_SIZE`                                       |       ⚪ | Maximum allowed file size (bytes)                                                                                                                                                                                                                                                                        |
+| `MAX_DIRECT_UPLOAD`                                         |       ⚪ | Threshold for supporting legacy direct uploads                                                                                                                                                                                                                                                           |
+| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID` |       ✅ | Required for generating [presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/) for downloads.                                                                                                                                                                                                                                           |
 
 Configure [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/):
 
@@ -176,6 +176,12 @@ R2_S3_ENDPOINT="<R2_S3_API_ENDPOINT_URL>"
 CF-Access-Client-Id="<ACCESS_SERVICE_TOKEN_CLIENT_ID>"
 CF-Access-Client-Secret="<ACCESS_SERVICE_TOKEN_CLIENT_SECRET>"
 ENVIRONMENT: "development"
+```
+
+For local development run:
+
+```bash
+npx wrangler dev --env development
 ```
 
 ## Metadata mapping (what is stored where)
@@ -313,6 +319,8 @@ curl -v -H "CF-Access-Client-Id: <CLIENT_ID>" -H "CF-Access-Client-Secret: <CLIE
   -F "checksum=<64-char-sha256-hex>" \
   "https://files.automatic-demo.com/api/admin/upload"
 ```
+
+> Replace the `<your-name>.cloudflareaccess.com` endpoint on the [`public/admin.html`](public/admin.html) frontend, to trigger the logout properly within your own Zero Trust tenant.
 
 ## File Management
 
