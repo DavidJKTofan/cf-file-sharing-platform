@@ -69,7 +69,7 @@ export async function handleDownload(c: Context<{ Bindings: Env; Variables: { us
 
 		if (config.ENVIRONMENT === 'production') {
 			console.log(
-				`[INFO] Generating presigned URL for: bucket=${R2_BUCKET_NAME}, key=${r2Key}, endpoint=https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+				`[INFO] Generating presigned URL for: bucket=${R2_BUCKET_NAME}, key=${r2Key}, endpoint=https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
 			);
 		}
 
@@ -81,7 +81,7 @@ export async function handleDownload(c: Context<{ Bindings: Env; Variables: { us
 		});
 
 		const url = new URL(`https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${R2_BUCKET_NAME}/${r2Key}`);
-		url.searchParams.set('X-Amz-Expires', '900'); // 15 minutes
+		url.searchParams.set('X-Amz-Expires', '600'); // 10 minutes
 
 		const signedRequest = await aws.sign(url.href, {
 			aws: { signQuery: true },

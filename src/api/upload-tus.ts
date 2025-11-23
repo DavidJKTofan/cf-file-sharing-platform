@@ -200,7 +200,7 @@ export async function handleTusUploadChunk(c: Context<{ Bindings: Env; Variables
 					...meta,
 					size: meta.totalSize,
 					uploadType: 'tus',
-				}),
+				})
 			);
 		}
 	}

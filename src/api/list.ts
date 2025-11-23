@@ -88,7 +88,7 @@ type GetFilteredFilesOptions = z.infer<typeof adminListQuerySchema>;
 // Shared function to get filtered files
 async function getFilteredFiles(
 	c: Context<{ Bindings: Env; Variables: { user?: User } }>,
-	options: GetFilteredFilesOptions,
+	options: GetFilteredFilesOptions
 ): Promise<{ files: FileListItem[] }> {
 	const { env } = c;
 	const caller = c.get('user');

@@ -154,25 +154,23 @@ npm run build:css
 
 ### Environment Variables
 
-| Name                                                        | Required | Purpose                                                                                                                                                                                                                                                                                                  |
-| ----------------------------------------------------------- | -------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `R2_FILES` (binding)                                        |       ✅ | R2 bucket binding (object storage)                                                                                                                                                                                                                                                                       |
-| `FILE_METADATA` (KV binding)                                |       ✅ | KV for `tus:<fileId>` (in-progress) and `file:<fileId>` final metadata                                                                                                                                                                                                                                   |
-| `ROLES_DB` (D1 binding)                                     |       ✅ | Required D1 DB for role lookup                                                                                                                                                                                                                                                                           |
-| `MAX_TOTAL_FILE_SIZE`                                       |       ⚪ | Maximum allowed file size (bytes)                                                                                                                                                                                                                                                                        |
-| `MAX_DIRECT_UPLOAD`                                         |       ⚪ | Threshold for supporting legacy direct uploads                                                                                                                                                                                                                                                           |
-| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID` |       ✅ | Required for generating [presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/) for downloads.                                                                                                                                                                                                                                           |
+| Name                                                        | Required | Purpose                                                                                                                                                                                               |
+| ----------------------------------------------------------- | -------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `R2_FILES` (binding)                                        |       ✅ | R2 bucket binding (object storage)                                                                                                                                                                    |
+| `FILE_METADATA` (KV binding)                                |       ✅ | KV for `tus:<fileId>` (in-progress) and `file:<fileId>` final metadata                                                                                                                                |
+| `ROLES_DB` (D1 binding)                                     |       ✅ | Required D1 DB for role lookup                                                                                                                                                                        |
+| `MAX_TOTAL_FILE_SIZE`                                       |       ⚪ | Maximum allowed file size (bytes)                                                                                                                                                                     |
+| `MAX_DIRECT_UPLOAD`                                         |       ⚪ | Threshold for supporting legacy direct uploads                                                                                                                                                        |
+| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID` |       ✅ | Required for generating [presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/) for downloads, using [aws4fetch](https://developers.cloudflare.com/r2/examples/aws/aws4fetch/). |
 
 Configure [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/):
 
 Local `.dev.vars` file for local development:
 
 ```
-R2_TOKEN_VALUE="<R2_TOKEN_VALUE>"
 R2_ACCESS_KEY_ID="<R2_ACCESS_KEY_ID>"
 R2_SECRET_ACCESS_KEY="<R2_SECRET_ACCESS_KEY>"
 R2_ACCOUNT_ID="<CLOUDFLARE_ACCOUNT_ID>"
-R2_S3_ENDPOINT="<R2_S3_API_ENDPOINT_URL>"
 CF-Access-Client-Id="<ACCESS_SERVICE_TOKEN_CLIENT_ID>"
 CF-Access-Client-Secret="<ACCESS_SERVICE_TOKEN_CLIENT_SECRET>"
 ENVIRONMENT: "development"
@@ -252,7 +250,7 @@ List publicly visible files (excludes hidden/expired)
 
 #### `GET /api/download/:fileId`
 
-Download file by ID
+Redirects to a presigned URL to download the file by ID.
 
 ### Admin Endpoints (Protected)
 
@@ -295,10 +293,10 @@ List public files (public endpoint):
 curl -sS 'https://files.automatic-demo.com/api/list?limit=10' | jq
 ```
 
-Download a file (direct Worker endpoint):
+Download a file (the `-L` flag follows the redirect to the presigned URL):
 
 ```bash
-curl -OJ 'https://files.automatic-demo.com/api/download/<fileId>'
+curl -OJ -L 'https://files.automatic-demo.com/api/download/<fileId>'
 ```
 
 Admin list (requires Cloudflare Access [cookie](https://developers.cloudflare.com/cloudflare-one/identity/authorization-cookie/) or [Service Token](https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/)) because we created an [Access App](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-public-app/):

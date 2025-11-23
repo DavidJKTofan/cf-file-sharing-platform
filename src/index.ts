@@ -60,7 +60,8 @@ app.use('*', async (c, next) => {
 		'X-Content-Type-Options': 'nosniff',
 		'Referrer-Policy': 'strict-origin-when-cross-origin',
 		'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
-		'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; upgrade-insecure-requests;",
+		'Content-Security-Policy':
+			"default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; upgrade-insecure-requests;",
 		'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
 	};
 	for (const [key, value] of Object.entries(headers)) {

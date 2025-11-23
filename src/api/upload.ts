@@ -9,7 +9,10 @@ const uploadFormSchema = z.object({
 	tags: z.string().optional(),
 	expiration: z.string().optional(),
 	checksum: z.string().optional(),
-	hideFromList: z.string().transform((s) => s.toLowerCase() === 'true').optional(),
+	hideFromList: z
+		.string()
+		.transform((s) => s.toLowerCase() === 'true')
+		.optional(),
 	requiredRole: z.string().optional(),
 });
 
