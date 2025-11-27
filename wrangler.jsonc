@@ -4,7 +4,7 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "file-sharing-platform",
+	"name": "cf-file-sharing-platform",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-11-12",
 	"compatibility_flags": ["global_fetch_strictly_public"],
@@ -42,6 +42,22 @@
 			"database_id": "a1c8373e-8ede-4286-ad6d-e72d2cbccc8c"
 		}
 	],
+	// Durable Objects for TUS resumable uploads
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "TUS_UPLOAD_HANDLER",
+				"class_name": "TusUploadHandler"
+			}
+		]
+	},
+	// Durable Object migrations
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["TusUploadHandler"]
+		}
+	],
 	"vars": {
 		"MAX_DIRECT_UPLOAD": "100000000",
 		"MAX_TOTAL_FILE_SIZE": "5000000000",
@@ -73,6 +89,15 @@
 					"database_id": "a1c8373e-8ede-4286-ad6d-e72d2cbccc8c"
 				}
 			],
+			// Durable Objects binding for development
+			"durable_objects": {
+				"bindings": [
+					{
+						"name": "TUS_UPLOAD_HANDLER",
+						"class_name": "TusUploadHandler"
+					}
+				]
+			},
 			"vars": {
 				"MAX_DIRECT_UPLOAD": "100000000",
 				"MAX_TOTAL_FILE_SIZE": "5000000000",

@@ -1,41 +1,101 @@
+/**
+ * @fileoverview File listing handlers for public and admin views.
+ *
+ * Provides endpoints for:
+ * - Public file listings (filtered by visibility and expiration)
+ * - Admin file listings (with statistics and all files)
+ * - Expired file cleanup
+ *
+ * @module api/list
+ */
+
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { z } from 'zod';
-import type { Env, User } from '../types';
+import type { Env, User, FileListItem } from '../types';
+import { isAdmin } from '../auth';
 
+// ============================================================================
+// Validation Schemas
+// ============================================================================
+
+/**
+ * Schema for public list query parameters.
+ */
 const listQuerySchema = z.object({
-	search: z.string().optional(),
+	/** Search term for filtering by filename, description, or tags */
+	search: z.string().max(200).optional(),
+	/** Maximum number of files to return (1-100) */
 	limit: z.coerce.number().int().min(1).max(100).default(100),
+	/** Pagination cursor for fetching next page */
 	cursor: z.string().optional(),
 });
 
+/**
+ * Schema for admin list query parameters.
+ * Extends public schema with additional filter options.
+ */
 const adminListQuerySchema = listQuerySchema.extend({
-	includeExpired: z.preprocess((v) => String(v) !== 'false', z.boolean().default(true)),
-	includeHidden: z.preprocess((v) => String(v) !== 'false', z.boolean().default(true)),
+	/** Include expired files in results (default: true) */
+	includeExpired: z.preprocess(
+		(v) => String(v) !== 'false',
+		z.boolean().default(true)
+	),
+	/** Include hidden files in results (default: true) */
+	includeHidden: z.preprocess(
+		(v) => String(v) !== 'false',
+		z.boolean().default(true)
+	),
 });
 
-interface FileListItem {
-	fileId: string;
-	filename: string;
-	description?: string;
-	tags?: string;
-	expiration?: string;
-	checksum?: string;
-	uploadedAt: string;
-	size: number;
-	contentType?: string;
-	uploadType?: string;
-	downloadUrl: string;
-	isExpired: boolean;
-	hideFromList: boolean;
-	requiredRole: string | null;
+/** Inferred type for filter options */
+type ListFilterOptions = z.infer<typeof adminListQuerySchema>;
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/** Statistics for admin file listing */
+interface FileStats {
+	totalFiles: number;
+	totalSize: number;
+	averageSize: number;
+	largestFileSize: number;
+	expiredFiles: number;
+	hiddenFiles: number;
+	publicFiles: number;
 }
 
-// Public list handler - excludes hidden and expired files by default
-export async function handleList(c: Context<{ Bindings: Env; Variables: { user?: User } }>): Promise<Response> {
+/** Result from getFilteredFiles */
+interface FilteredFilesResult {
+	files: FileListItem[];
+}
+
+// ============================================================================
+// Public List Handler
+// ============================================================================
+
+/**
+ * Handles public file listing requests.
+ *
+ * @remarks
+ * Returns only publicly visible files:
+ * - Excludes hidden files
+ * - Excludes expired files
+ * - Excludes files requiring roles the user doesn't have
+ *
+ * @param c - Hono context with environment bindings and optional user
+ * @returns JSON response with file list
+ */
+export async function handleList(
+	c: Context<{ Bindings: Env; Variables: { user?: User } }>
+): Promise<Response> {
+	const { logger } = c.env;
 	const query = listQuerySchema.parse(c.req.query());
 
-	const result = await getFilteredFiles(c as any, {
+	logger.debug('Public file list requested', { search: query.search, limit: query.limit });
+
+	const result = await getFilteredFiles(c, {
 		...query,
 		includeExpired: false,
 		includeHidden: false,
@@ -47,34 +107,57 @@ export async function handleList(c: Context<{ Bindings: Env; Variables: { user?:
 	});
 }
 
-// Admin list handler - includes all files with comprehensive stats
-export async function handleAdminList(c: Context<{ Bindings: Env; Variables: { user: User } }>): Promise<Response> {
+// ============================================================================
+// Admin List Handler
+// ============================================================================
+
+/**
+ * Handles admin file listing requests with statistics.
+ *
+ * @remarks
+ * Returns all files with comprehensive statistics:
+ * - Total file count and size
+ * - Expired and hidden file counts
+ * - Supports filtering via query parameters
+ *
+ * @param c - Hono context with environment bindings and authenticated user
+ * @returns JSON response with file list and statistics
+ */
+export async function handleAdminList(
+	c: Context<{ Bindings: Env; Variables: { user: User } }>
+): Promise<Response> {
+	const { logger } = c.env;
 	const query = adminListQuerySchema.parse(c.req.query());
 
-	// Get all files to calculate comprehensive stats
-	const allFilesResult = await getFilteredFiles(c as any, {
-		limit: 1000,
-		includeExpired: true,
-		includeHidden: true,
+	logger.debug('Admin file list requested', {
+		search: query.search,
+		includeExpired: query.includeExpired,
+		includeHidden: query.includeHidden,
 	});
 
-	const allFiles = allFilesResult.files || [];
-	const totalSize = allFiles.reduce((sum, file) => sum + file.size, 0);
-	const expiredCount = allFiles.filter((f) => f.isExpired).length;
-	const hiddenCount = allFiles.filter((f) => f.hideFromList).length;
+	// Get all files to calculate comprehensive stats
+	const allFilesResult = await getFilteredFiles(
+		c as Context<{ Bindings: Env; Variables: { user?: User } }>,
+		{
+			limit: 1000,
+			includeExpired: true,
+			includeHidden: true,
+		}
+	);
 
-	const stats = {
-		totalFiles: allFiles.length,
-		totalSize,
-		averageSize: allFiles.length > 0 ? totalSize / allFiles.length : 0,
-		largestFileSize: Math.max(0, ...allFiles.map((f) => f.size)),
-		expiredFiles: expiredCount,
-		hiddenFiles: hiddenCount,
-		publicFiles: allFiles.length - hiddenCount,
-	};
+	const allFiles = allFilesResult.files;
+	const stats = calculateStats(allFiles);
 
-	// Get filtered files for display
-	const filteredResult = await getFilteredFiles(c as any, query);
+	// Get filtered files for display based on query params
+	const filteredResult = await getFilteredFiles(
+		c as Context<{ Bindings: Env; Variables: { user?: User } }>,
+		query
+	);
+
+	logger.info('Admin file list returned', {
+		totalFiles: stats.totalFiles,
+		filteredCount: filteredResult.files.length,
+	});
 
 	return c.json({
 		success: true,
@@ -83,22 +166,58 @@ export async function handleAdminList(c: Context<{ Bindings: Env; Variables: { u
 	});
 }
 
-type GetFilteredFilesOptions = z.infer<typeof adminListQuerySchema>;
+/**
+ * Calculates statistics from a list of files.
+ *
+ * @param files - Array of file list items
+ * @returns Computed statistics
+ */
+function calculateStats(files: FileListItem[]): FileStats {
+	const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+	const expiredCount = files.filter((f) => f.isExpired).length;
+	const hiddenCount = files.filter((f) => f.hideFromList).length;
 
-// Shared function to get filtered files
+	return {
+		totalFiles: files.length,
+		totalSize,
+		averageSize: files.length > 0 ? Math.round(totalSize / files.length) : 0,
+		largestFileSize: files.length > 0 ? Math.max(...files.map((f) => f.size)) : 0,
+		expiredFiles: expiredCount,
+		hiddenFiles: hiddenCount,
+		publicFiles: files.length - hiddenCount,
+	};
+}
+
+// ============================================================================
+// Shared File Filtering
+// ============================================================================
+
+/**
+ * Fetches and filters files from R2 based on options.
+ *
+ * @remarks
+ * Applies multiple filters:
+ * - Hidden file visibility
+ * - Expiration status
+ * - Role-based access
+ * - Search term matching
+ *
+ * @param c - Hono context
+ * @param options - Filter options
+ * @returns Filtered and sorted file list
+ */
 async function getFilteredFiles(
 	c: Context<{ Bindings: Env; Variables: { user?: User } }>,
-	options: GetFilteredFilesOptions
-): Promise<{ files: FileListItem[] }> {
+	options: ListFilterOptions
+): Promise<FilteredFilesResult> {
 	const { env } = c;
+	const { logger } = env;
 	const caller = c.get('user');
 	const { search, limit, cursor, includeExpired, includeHidden } = options;
 
-	if (env.config.ENVIRONMENT === 'development') {
-		console.log('[DEBUG] getFilteredFiles called with options:', JSON.stringify(options, null, 2));
-		console.log('[DEBUG] Caller:', JSON.stringify(caller, null, 2));
-	}
+	logger.debug('Fetching files from R2', { limit, cursor: !!cursor });
 
+	// Build R2 list options
 	const listOptions: R2ListOptions = {
 		limit: Math.min(limit, 1000),
 		cursor,
@@ -108,87 +227,181 @@ async function getFilteredFiles(
 	const listResult = await env.R2_FILES.list(listOptions);
 	const files: FileListItem[] = [];
 	const now = new Date();
-	const callerRoles = caller?.roles || [];
-	const isCallerAdmin = callerRoles.includes('admin');
+	const callerRoles = caller?.roles ?? [];
+	const callerIsAdmin = isAdmin(caller);
 
+	// Process each R2 object
 	for (const object of listResult.objects) {
-		if (env.config.ENVIRONMENT === 'development') {
-			console.log(`[DEBUG] Processing object: ${object.key}`, JSON.stringify(object.customMetadata, null, 2));
-		}
-		const keyParts = object.key.split('/');
-		const fileId = keyParts[0];
-		const filename = keyParts.slice(1).join('/');
-
-		let kvMetadata: any = {};
-		if (env.FILE_METADATA) {
-			const kvData = await env.FILE_METADATA.get(`file:${fileId}`);
-			if (kvData) kvMetadata = JSON.parse(kvData);
-		}
-
-		const customMetadata = { ...object.customMetadata, ...kvMetadata };
-		const isHidden = customMetadata.hideFromList === 'true' || customMetadata.hideFromList === true;
-
-		if (isHidden && !includeHidden) continue;
-
-		const requiredRole = customMetadata.requiredRole || customMetadata.requiredrole;
-		if (requiredRole && !isCallerAdmin && !callerRoles.includes(requiredRole)) {
-			continue;
-		}
-
-		const expirationString = customMetadata.expiration || '';
-		let isExpired = false;
-		if (expirationString) {
-			const expirationDate = new Date(expirationString);
-			if (expirationDate <= now) isExpired = true;
-		}
-
-		if (isExpired && !includeExpired) continue;
-
-		const searchableText = `${filename} ${customMetadata.description || ''} ${customMetadata.tags || ''}`.toLowerCase();
-		if (search && !searchableText.includes(search.toLowerCase())) {
-			continue;
-		}
-
-		files.push({
-			fileId,
-			filename: filename || 'Unknown',
-			description: customMetadata.description || '',
-			tags: customMetadata.tags || '',
-			expiration: expirationString,
-			checksum: customMetadata.checksum || '',
-			uploadedAt: customMetadata.uploadedAt || object.uploaded?.toISOString() || '',
-			size: object.size,
-			contentType: object.httpMetadata?.contentType || 'application/octet-stream',
-			uploadType: customMetadata.uploadType || 'unknown',
-			downloadUrl: `/api/download/${fileId}`,
-			isExpired,
-			hideFromList: isHidden,
-			requiredRole: requiredRole || null,
+		const fileItem = await processR2Object(env, object, {
+			now,
+			callerRoles,
+			callerIsAdmin,
+			includeExpired,
+			includeHidden,
+			search,
 		});
+
+		if (fileItem) {
+			files.push(fileItem);
+		}
 	}
 
-	files.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+	// Sort by upload date (newest first)
+	files.sort((a, b) => {
+		const dateA = new Date(a.uploadedAt).getTime();
+		const dateB = new Date(b.uploadedAt).getTime();
+		return dateB - dateA;
+	});
+
 	return { files };
 }
 
-// Helper function to clean up expired files
-export async function cleanupExpiredFiles(c: Context<{ Bindings: Env; Variables: { user: User } }>): Promise<Response> {
+/** Options for processing individual R2 objects */
+interface ProcessObjectOptions {
+	now: Date;
+	callerRoles: string[];
+	callerIsAdmin: boolean;
+	includeExpired: boolean;
+	includeHidden: boolean;
+	search?: string;
+}
+
+/**
+ * Processes a single R2 object into a FileListItem.
+ *
+ * @param env - Environment bindings
+ * @param object - R2 object from list
+ * @param options - Processing options
+ * @returns FileListItem or null if filtered out
+ */
+async function processR2Object(
+	env: Env,
+	object: R2Object,
+	options: ProcessObjectOptions
+): Promise<FileListItem | null> {
+	const { now, callerRoles, callerIsAdmin, includeExpired, includeHidden, search } = options;
+
+	// Parse object key
+	const keyParts = object.key.split('/');
+	const fileId = keyParts[0];
+	const filename = keyParts.slice(1).join('/') || 'Unknown';
+
+	// Fetch KV metadata if available
+	let kvMetadata: Record<string, unknown> = {};
+	if (env.FILE_METADATA) {
+		try {
+			const kvData = await env.FILE_METADATA.get(`file:${fileId}`);
+			if (kvData) {
+				kvMetadata = JSON.parse(kvData);
+			}
+		} catch {
+			// Ignore KV parse errors
+		}
+	}
+
+	// Merge metadata from R2 and KV
+	const metadata = { ...object.customMetadata, ...kvMetadata };
+
+	// Check hidden status
+	const isHidden = metadata.hideFromList === 'true' || metadata.hideFromList === true;
+	if (isHidden && !includeHidden) {
+		return null;
+	}
+
+	// Check role requirement
+	const requiredRole = (metadata.requiredRole ?? metadata.requiredrole) as string | undefined;
+	if (requiredRole && !callerIsAdmin && !callerRoles.includes(requiredRole)) {
+		return null;
+	}
+
+	// Check expiration
+	const expirationString = (metadata.expiration as string) ?? '';
+	let isExpired = false;
+	if (expirationString) {
+		const expirationDate = new Date(expirationString);
+		isExpired = expirationDate <= now;
+	}
+	if (isExpired && !includeExpired) {
+		return null;
+	}
+
+	// Apply search filter
+	if (search) {
+		const searchLower = search.toLowerCase();
+		const searchableText = [
+			filename,
+			metadata.description as string,
+			metadata.tags as string,
+		]
+			.filter(Boolean)
+			.join(' ')
+			.toLowerCase();
+
+		if (!searchableText.includes(searchLower)) {
+			return null;
+		}
+	}
+
+	// Build file list item
+	return {
+		fileId,
+		filename,
+		description: (metadata.description as string) ?? '',
+		tags: (metadata.tags as string) ?? '',
+		expiration: expirationString,
+		checksum: (metadata.checksum as string) ?? '',
+		uploadedAt:
+			(metadata.uploadedAt as string) ?? object.uploaded?.toISOString() ?? '',
+		size: object.size,
+		contentType: object.httpMetadata?.contentType ?? 'application/octet-stream',
+		uploadType: (metadata.uploadType as string) ?? 'unknown',
+		downloadUrl: `/api/download/${fileId}`,
+		isExpired,
+		hideFromList: isHidden,
+		requiredRole: requiredRole ?? null,
+	};
+}
+
+// ============================================================================
+// Cleanup Handler
+// ============================================================================
+
+/**
+ * Cleans up expired files from R2 and KV.
+ *
+ * @remarks
+ * Iterates through all files in R2, identifies expired ones based on
+ * their expiration metadata, and deletes them. Also removes corresponding
+ * KV metadata entries.
+ *
+ * @param c - Hono context with environment bindings and authenticated user
+ * @returns JSON response with count of deleted files
+ */
+export async function cleanupExpiredFiles(
+	c: Context<{ Bindings: Env; Variables: { user: User } }>
+): Promise<Response> {
 	const { env } = c;
+	const { logger } = env;
+
 	if (!env.R2_FILES) {
 		throw new HTTPException(500, { message: 'File storage is not configured.' });
 	}
 
-	if (env.config.ENVIRONMENT === 'development') {
-		console.log('[DEBUG] Starting cleanup of expired files.');
-	}
+	logger.info('Starting expired file cleanup');
 
 	let deletedCount = 0;
 	let cursor: string | undefined;
 	const now = new Date();
 
+	// Iterate through all files in batches
 	do {
-		const listResult: R2Objects = await env.R2_FILES.list({ limit: 500, cursor, include: ['customMetadata'] });
+		const listResult: R2Objects = await env.R2_FILES.list({
+			limit: 500,
+			cursor,
+			include: ['customMetadata'],
+		});
 
+		// Find expired files
 		const expiredKeys = listResult.objects
 			.filter((obj) => {
 				const expiration = obj.customMetadata?.expiration;
@@ -196,26 +409,31 @@ export async function cleanupExpiredFiles(c: Context<{ Bindings: Env; Variables:
 			})
 			.map((obj) => obj.key);
 
+		// Delete expired files
 		if (expiredKeys.length > 0) {
-			if (env.config.ENVIRONMENT === 'development') {
-				console.log(`[DEBUG] Deleting ${expiredKeys.length} expired files:`, expiredKeys);
-			}
+			logger.debug('Deleting expired files', { count: expiredKeys.length });
+
 			await env.R2_FILES.delete(expiredKeys);
 			deletedCount += expiredKeys.length;
 
+			// Clean up KV metadata
 			if (env.FILE_METADATA) {
-				const expiredFileIds = expiredKeys.map((key) => key.split('/')[0]);
-				for (const fileId of expiredFileIds) {
-					await env.FILE_METADATA.delete(`file:${fileId}`);
-				}
+				const deletePromises = expiredKeys.map((key) => {
+					const fileId = key.split('/')[0];
+					return env.FILE_METADATA!.delete(`file:${fileId}`);
+				});
+				await Promise.all(deletePromises);
 			}
 		}
+
 		cursor = listResult.truncated ? listResult.cursor : undefined;
 	} while (cursor);
 
-	if (env.config.ENVIRONMENT === 'development') {
-		console.log(`[DEBUG] Finished cleanup. Deleted ${deletedCount} files.`);
-	}
+	logger.info('Expired file cleanup completed', { deletedCount });
 
-	return c.json({ success: true, deletedCount });
+	return c.json({
+		success: true,
+		deletedCount,
+		message: `Deleted ${deletedCount} expired file(s).`,
+	});
 }

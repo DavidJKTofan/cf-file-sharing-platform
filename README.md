@@ -7,22 +7,24 @@ The project is a serverless application with the following components:
 - **Backend**: Cloudflare Workers written in TypeScript, using the Hono web framework.
 - **File Storage**: Cloudflare R2 for object storage.
 - **Metadata Storage**: Cloudflare KV for storing file metadata.
+- **Upload State**: Cloudflare Durable Objects with SQLite for TUS resumable upload state management.
 - **User Roles**: Cloudflare D1 for managing user roles and permissions.
 - **Authentication**: Cloudflare Access for securing admin endpoints.
 - **Frontend**: Vanilla JavaScript, HTML, and Tailwind CSS.
 
-The application supports two upload methods: a legacy `multipart/form-data` upload and a modern, resumable upload using the TUS protocol.
+The application supports two upload methods: a legacy `multipart/form-data` upload and a modern, resumable upload using the [TUS protocol](https://tus.io/) with Durable Objects for reliable state persistence.
 
 ## Architecture
 
 Built with a modern serverless stack:
 
 - **Frontend**: Vanilla JavaScript, HTML5, Tailwind CSS
-- **Backend**: Cloudflare Workers (TypeScript)
+- **Backend**: Cloudflare Workers (TypeScript) with Hono framework
 - **File Storage**: Cloudflare R2 Object Storage
-- **Metadata Database**: Cloudflare Workers KV
+- **Metadata Cache**: Cloudflare Workers KV
+- **Upload State**: Cloudflare Durable Objects (SQLite-backed) for TUS resumable uploads
+- **User Roles**: Cloudflare D1 (SQLite)
 - **Security**: Cloudflare Access for authentication
-- **Database for User Roles**: Cloudflare D1
 
 ```mermaid
 graph TB
@@ -39,8 +41,12 @@ graph TB
 
     subgraph "Storage Layer"
         F[Cloudflare R2<br/>Object Storage]
-        G[Cloudflare KV<br/>Metadata Store]
-        H[D1 <br/> User Roles]
+        G[Cloudflare KV<br/>Metadata Cache]
+        H[D1<br/>User Roles]
+    end
+
+    subgraph "Durable Objects"
+        M[TusUploadHandler<br/>SQLite Storage]
     end
 
     subgraph "API Endpoints"
@@ -64,18 +70,22 @@ graph TB
     D --> F
     D --> G
     D --> H
+    L --> M
+    M --> F
 
     classDef client fill:#e1f5fe
     classDef edge fill:#f3e5f5
     classDef storage fill:#e8f5e8
     classDef api fill:#fff3e0
     classDef upload fill:#fce4ec
+    classDef durable fill:#e0f2f1
 
     class A,B,C client
     class D,E edge
     class F,G,H storage
     class I,J api
     class K,L upload
+    class M durable
 ```
 
 ## Screenshots
@@ -157,13 +167,14 @@ npm run build:css
 | Name                                                        | Required | Purpose                                                                                                                                                                                               |
 | ----------------------------------------------------------- | -------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `R2_FILES` (binding)                                        |       ✅ | R2 bucket binding (object storage)                                                                                                                                                                    |
-| `FILE_METADATA` (KV binding)                                |       ✅ | KV for `tus:<fileId>` (in-progress) and `file:<fileId>` final metadata                                                                                                                                |
+| `FILE_METADATA` (KV binding)                                |       ✅ | KV for `file:<fileId>` metadata cache                                                                                                                                                                 |
+| `TUS_UPLOAD_HANDLER` (DO binding)                           |       ✅ | Durable Object namespace for TUS resumable upload state (SQLite-backed)                                                                                                                               |
 | `ROLES_DB` (D1 binding)                                     |       ✅ | Required D1 DB for role lookup                                                                                                                                                                        |
 | `MAX_TOTAL_FILE_SIZE`                                       |       ⚪ | Maximum allowed file size (bytes)                                                                                                                                                                     |
 | `MAX_DIRECT_UPLOAD`                                         |       ⚪ | Threshold for supporting legacy direct uploads                                                                                                                                                        |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID` |       ✅ | Required for generating [presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/) for downloads, using [aws4fetch](https://developers.cloudflare.com/r2/examples/aws/aws4fetch/). |
 
-Configure [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/):
+**To-Do:** Configure [Secrets](https://developers.cloudflare.com/workers/configuration/secrets/):
 
 Local `.dev.vars` file for local development:
 
@@ -184,29 +195,46 @@ npx wrangler dev --env development
 
 ## Metadata mapping (what is stored where)
 
-This codebase stores metadata both on the R2 object (`customMetadata`) and in Workers KV. The list endpoints prefer fresh metadata from R2 custom metadata and fall back to KV when needed.
+This codebase stores metadata across multiple storage layers for optimal performance and reliability.
 
-- **R2 object `customMetadata`** — written at multipart creation; available immediately on the object:
+### R2 Object `customMetadata`
 
-  - `fileId` — UUID assigned at upload creation
-  - `originalName` — original filename
-  - `description` — free text
-  - `tags` — comma separated
-  - `expiration` — ISO datetime (UTC)
-  - `checksum` — SHA-256 hex (64 hex chars)
-  - `uploadedAt` — ISO datetime (UTC)
-  - `hideFromList` — `"true"` / `"false"`
-  - `uploadType` — e.g. `"multipart"` (set for TUS-resumable multipart uploads)
-  - `asn`, `country`, `city`, `timezone` — Cloudflare edge geo fields (if available)
-  - `userAgent` — client user-agent string (optional)
+Written at upload creation; available immediately on the object:
 
-- **Workers KV** — two keys are used:
+- `fileId` — UUID assigned at upload creation
+- `originalName` — original filename
+- `description` — free text
+- `tags` — comma separated
+- `expiration` — ISO datetime (UTC)
+- `checksum` — SHA-256 hex (64 hex chars)
+- `uploadedAt` — ISO datetime (UTC)
+- `hideFromList` — `"true"` / `"false"`
+- `uploadType` — `"multipart"` or `"tus"`
+- `asn`, `country`, `city`, `timezone` — Cloudflare edge geo fields (if available)
+- `userAgent` — client user-agent string (optional)
 
-  - `tus:<fileId>` — in-progress TUS metadata and parts array (used for PATCH/HEAD/abort)
-  - `file:<fileId>` — final metadata record written at completion (fields mirror those above plus `r2Key`, `r2ETag`, and `size`)
+### Durable Objects (SQLite)
 
-- **List behavior**
-  - Listing endpoints read R2 `customMetadata` first (fresh), then `file:<fileId>` in KV as fallback. This ensures up-to-date visibility and robust behavior if R2 was temporarily unavailable.
+TUS upload state is managed by the `TusUploadHandler` Durable Object with SQLite storage:
+
+- **`upload_info` table** — stores upload metadata:
+  - `upload_id`, `r2_key`, `multipart_upload_id`
+  - `total_size`, `uploaded_size`
+  - `filename`, `content_type`, `custom_metadata` (JSON)
+  - `created_at`, `expires_at`, `is_completed`
+
+- **`uploaded_parts` table** — tracks multipart parts:
+  - `part_number`, `etag`, `size`
+
+- **Automatic cleanup** — Durable Object alarms delete expired uploads after 7 days
+
+### Workers KV
+
+- `file:<fileId>` — final metadata record written at completion (for fast lookups)
+
+### List behavior
+
+Listing endpoints read R2 `customMetadata` first (fresh), then `file:<fileId>` in KV as fallback. This ensures up-to-date visibility and robust behavior if R2 was temporarily unavailable.
 
 ## Security Checklist
 
@@ -225,7 +253,7 @@ To prevent abuse or dictionary attacks, we recommend deploying a [Rate Limiting]
 - `/api/admin/r2-info` - R2 dashboard access
 - `/api/debug/jwt` – debug Access token
 
-> Protect `/admin` and `/api/admin` endpoints with [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/).
+> **To-Do:** Protect `/admin` and `/api/admin` endpoints with [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/).
 
 **Public Paths:**
 
@@ -359,11 +387,16 @@ The admin dashboard shows:
 ├── src/                 	# Cloudflare Worker source code
 │   ├── index.ts         	# Main Worker entry point and API routes
 │   ├── types.ts         	# TypeScript type definitions
-│   └── api/             	# API handler modules
-│       ├── download.ts  	# File download logic
-│       ├── list.ts      	# File listing logic
-│       ├── upload-tus.ts	# TUS resumable upload logic
-│       └── upload.ts    	# Legacy multipart upload logic
+│   ├── config.ts        	# Configuration validation with Zod
+│   ├── auth.ts          	# Authentication and authorization middleware
+│   ├── logger.ts        	# Structured logging utility
+│   ├── api/             	# API handler modules
+│   │   ├── download.ts  	# File download logic
+│   │   ├── list.ts      	# File listing logic
+│   │   ├── upload-tus.ts	# TUS resumable upload handlers
+│   │   └── upload.ts    	# Legacy multipart upload logic
+│   └── durable/         	# Durable Object classes
+│       └── TusUploadHandler.ts  # TUS upload state management (SQLite)
 ├── .editorconfig        	# Editor configuration
 ├── .gitignore           	# Git ignore rules
 ├── .prettierrc          	# Prettier configuration
@@ -376,6 +409,55 @@ The admin dashboard shows:
 ├── tsconfig.json        	# TypeScript configuration
 ├── worker-configuration.d.ts # Worker type definitions
 └── wrangler.jsonc       	# Cloudflare Wrangler configuration
+```
+
+## TUS Resumable Upload Protocol
+
+The platform implements the [TUS protocol](https://tus.io/) for reliable, resumable file uploads. Key features:
+
+### Supported Extensions
+
+- **creation** — Create new uploads
+- **creation-with-upload** — Create and upload in single request
+- **expiration** — Uploads expire after 7 days
+- **termination** — Cancel/delete uploads
+
+### Architecture
+
+Each upload is managed by a dedicated Durable Object instance:
+
+1. **POST `/api/admin/upload/tus`** — Creates upload, returns `Location` header
+2. **PATCH `/api/admin/upload/tus/:uploadId`** — Upload chunks with `Upload-Offset`
+3. **HEAD `/api/admin/upload/tus/:uploadId`** — Get current upload status
+4. **DELETE `/api/admin/upload/tus/:uploadId`** — Cancel upload
+
+### Benefits of Durable Objects
+
+- **Consistency** — Single-threaded execution prevents race conditions
+- **Persistence** — SQLite storage survives Worker restarts
+- **Automatic cleanup** — Alarms delete expired uploads
+- **Scalability** — Each upload isolated in its own DO instance
+
+### Example TUS Upload (curl)
+
+```bash
+# Create upload
+curl -X POST "https://files.automatic-demo.com/api/admin/upload/tus" \
+  -H "CF-Access-Client-Id: <CLIENT_ID>" \
+  -H "CF-Access-Client-Secret: <CLIENT_SECRET>" \
+  -H "Tus-Resumable: 1.0.0" \
+  -H "Upload-Length: 1048576" \
+  -H "Upload-Metadata: filename $(echo -n 'test.bin' | base64)" \
+  -D -
+
+# Upload chunk (use Location from previous response)
+curl -X PATCH "https://files.automatic-demo.com/api/admin/upload/tus/<uploadId>" \
+  -H "CF-Access-Client-Id: <CLIENT_ID>" \
+  -H "CF-Access-Client-Secret: <CLIENT_SECRET>" \
+  -H "Tus-Resumable: 1.0.0" \
+  -H "Upload-Offset: 0" \
+  -H "Content-Type: application/offset+octet-stream" \
+  --data-binary @test.bin
 ```
 
 ## Inspirations
