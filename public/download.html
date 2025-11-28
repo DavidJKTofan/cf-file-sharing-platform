@@ -3,150 +3,258 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Download Files</title>
+		<title>CloudVault | File Manager</title>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
 		<link href="tailwind.css" rel="stylesheet" />
-		<style>
-			.hidden {
-				display: none !important;
-			}
-			.muted {
-				color: #6b7280;
-			} /* tailwind gray-500 */
-			.user-box {
-				min-width: 220px;
-				text-align: right;
-			}
-			.user-pill {
-				display: inline-block;
-				padding: 6px 10px;
-				border-radius: 999px;
-				font-size: 12px;
-				background: #eef2ff;
-				color: #3730a3;
-			}
-		</style>
 	</head>
-	<body class="bg-gray-100 min-h-screen py-8">
-		<div class="container mx-auto px-4">
-			<div class="max-w-7xl mx-auto bg-white rounded-2xl shadow-md p-6">
-				<div class="flex items-start justify-between mb-6">
-					<div>
-						<h1 class="text-3xl font-semibold text-gray-800">File Manager</h1>
-						<p class="text-sm text-gray-500 mt-1">Browse and download files available to you.</p>
+	<body class="bg-slate-50 min-h-screen">
+		<!-- Top Navigation Bar -->
+		<nav class="bg-white border-b border-slate-200 sticky top-0 z-50">
+			<div class="max-w-7xl mx-auto px-6">
+				<div class="flex items-center justify-between h-16">
+					<!-- Logo -->
+					<div class="flex items-center gap-3">
+						<a href="index.html" class="flex items-center gap-3">
+							<div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+								<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+								</svg>
+							</div>
+							<span class="text-lg font-bold text-slate-800">CloudVault</span>
+						</a>
 					</div>
 
-					<!-- Minimalistic User Info -->
-					<div class="user-box">
-						<div id="userEmailDisplay" class="text-sm text-gray-600">Loading user…</div>
-						<div id="userRolesDisplay" class="text-xs mt-1">
-							<span class="user-pill" id="userRolePill">Public</span>
+					<!-- User Info -->
+					<div class="flex items-center gap-4">
+						<div id="userEmailDisplay" class="text-sm text-slate-600 hidden sm:block">Loading...</div>
+						<div id="userRolesDisplay">
+							<span id="userRolePill" class="badge badge-info">Public</span>
 						</div>
 					</div>
 				</div>
+			</div>
+		</nav>
 
-				<!-- Status messages -->
-				<div id="statusMessage" class="hidden mb-4 p-3 rounded-lg"></div>
-
-				<!-- Controls Section -->
-				<div class="mb-6 space-y-4">
-					<div class="flex flex-col sm:flex-row gap-4">
-						<div class="flex-1">
-							<input
-								type="text"
-								id="searchBox"
-								class="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm focus:ring-3 focus:ring-blue-500 focus:border-blue-500"
-								placeholder="Search files by name, description, or tags..."
-							/>
-						</div>
-						<div class="flex gap-2">
-							<button id="refreshBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium">
-								🔄 Refresh
-							</button>
-							<button id="clearSearchBtn" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition font-medium">
-								Clear
-							</button>
-						</div>
-					</div>
-
-					<!-- File Stats -->
-					<div id="fileStats" class="text-sm text-gray-600">
-						<span id="totalFiles">Loading files...</span>
-					</div>
+		<div class="max-w-7xl mx-auto px-6 py-8">
+			<!-- Page Header -->
+			<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+				<div>
+					<h1 class="text-2xl font-bold text-slate-800">File Manager</h1>
+					<p class="text-slate-500 mt-1">Browse and download available files</p>
 				</div>
+				<a href="admin.html" class="btn-premium inline-flex items-center gap-2 text-sm px-4 py-2.5 self-start">
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+					</svg>
+					Upload Files
+				</a>
+			</div>
 
-				<!-- Direct File Access -->
-				<div class="mb-6 p-4 bg-gray-50 rounded-lg">
-					<h2 class="text-lg font-medium text-gray-800 mb-3">Direct File Access</h2>
-					<form id="retrieveForm" class="flex flex-col sm:flex-row gap-3">
-						<div class="flex-1">
-							<input
-								type="text"
-								id="fileId"
-								name="fileId"
-								required
-								class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-3 focus:ring-blue-500 focus:border-blue-500"
-								placeholder="Enter file ID for direct access"
-							/>
+			<!-- Status Message -->
+			<div id="statusMessage" class="hidden mb-6 p-4 rounded-xl"></div>
+
+			<!-- Search & Controls -->
+			<div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-6">
+				<div class="flex flex-col lg:flex-row gap-4">
+					<!-- Search Input -->
+					<div class="flex-1 relative">
+						<div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+							<svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+							</svg>
 						</div>
-						<button type="submit" class="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition">
-							Access File
+						<input
+							type="text"
+							id="searchBox"
+							class="input-premium w-full pl-12 pr-4 py-3 rounded-xl text-sm"
+							placeholder="Search files by name, description, or tags..."
+						/>
+					</div>
+					<div class="flex gap-3">
+						<button id="refreshBtn" class="btn-premium inline-flex items-center gap-2 px-5 py-3">
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+							</svg>
+							Refresh
 						</button>
-					</form>
+						<button id="clearSearchBtn" class="inline-flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition">
+							Clear
+						</button>
+					</div>
 				</div>
 
-				<!-- Files Table -->
+				<!-- File Stats -->
+				<div id="fileStats" class="mt-4 pt-4 border-t border-slate-100 text-sm text-slate-600">
+					<span id="totalFiles">Loading files...</span>
+				</div>
+			</div>
+
+			<!-- Direct File Access -->
+			<div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-6">
+				<div class="flex items-center gap-3 mb-4">
+					<div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+						<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+						</svg>
+					</div>
+					<div>
+						<h2 class="text-lg font-semibold text-slate-800">Direct File Access</h2>
+						<p class="text-sm text-slate-500">Access a file directly using its ID</p>
+					</div>
+				</div>
+				<form id="retrieveForm" class="flex flex-col sm:flex-row gap-3">
+					<div class="flex-1">
+						<input
+							type="text"
+							id="fileId"
+							name="fileId"
+							required
+							class="input-premium w-full rounded-xl px-4 py-3 text-sm"
+							placeholder="Enter file ID (e.g., a1b2c3d4-e5f6-7890-abcd-ef1234567890)"
+						/>
+					</div>
+					<button type="submit" class="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 transition shadow-lg shadow-emerald-500/20">
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+						</svg>
+						Access File
+					</button>
+				</form>
+			</div>
+
+			<!-- Files Table -->
+			<div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 				<div class="overflow-x-auto">
-					<table class="min-w-full text-sm text-left border-collapse bg-white rounded-lg overflow-hidden shadow-xs">
+					<table class="table-premium min-w-full text-sm">
 						<thead>
-							<tr class="bg-gray-100 text-gray-700">
-								<th data-col="filename" class="px-4 py-3 border-b cursor-pointer hover:bg-gray-200 transition">
-									<div class="flex items-center gap-1">Filename <span class="sort-indicator">↕️</span></div>
+							<tr class="border-b border-slate-200">
+								<th data-col="filename" class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition">
+									<div class="flex items-center gap-2">
+										Filename
+										<svg class="w-4 h-4 text-slate-400 sort-indicator" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+										</svg>
+									</div>
 								</th>
-								<th data-col="size" class="px-4 py-3 border-b cursor-pointer hover:bg-gray-200 transition">
-									<div class="flex items-center gap-1">Size <span class="sort-indicator">↕️</span></div>
+								<th data-col="size" class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition">
+									<div class="flex items-center gap-2">
+										Size
+										<svg class="w-4 h-4 text-slate-400 sort-indicator" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+										</svg>
+									</div>
 								</th>
-								<th data-col="description" class="px-4 py-3 border-b cursor-pointer hover:bg-gray-200 transition">
-									<div class="flex items-center gap-1">Description <span class="sort-indicator">↕️</span></div>
+								<th data-col="description" class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition hidden lg:table-cell bg-indigo-50/50">
+									<div class="flex items-center gap-2">
+										<svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+										</svg>
+										Description
+										<svg class="w-4 h-4 text-slate-400 sort-indicator" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+										</svg>
+									</div>
 								</th>
-								<th data-col="tags" class="px-4 py-3 border-b cursor-pointer hover:bg-gray-200 transition">
-									<div class="flex items-center gap-1">Tags <span class="sort-indicator">↕️</span></div>
+								<th data-col="tags" class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition hidden lg:table-cell bg-purple-50/50">
+									<div class="flex items-center gap-2">
+										<svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.98 1.98 0 013 12V7a4 4 0 014-4z" />
+										</svg>
+										Tags
+										<svg class="w-4 h-4 text-slate-400 sort-indicator" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+										</svg>
+									</div>
 								</th>
-								<th data-col="expiration" class="px-4 py-3 border-b cursor-pointer hover:bg-gray-200 transition">
-									<div class="flex items-center gap-1">Expiration <span class="sort-indicator">↕️</span></div>
+								<th data-col="expiration" class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition hidden sm:table-cell bg-amber-50/50">
+									<div class="flex items-center gap-2">
+										<svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+										</svg>
+										Expiration
+										<svg class="w-4 h-4 text-slate-400 sort-indicator" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+										</svg>
+									</div>
 								</th>
-								<th data-col="uploadedAt" class="px-4 py-3 border-b cursor-pointer hover:bg-gray-200 transition">
-									<div class="flex items-center gap-1">Uploaded <span class="sort-indicator">↕️</span></div>
+								<th data-col="uploadedAt" class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition hidden sm:table-cell bg-emerald-50/50">
+									<div class="flex items-center gap-2">
+										<svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+										</svg>
+										Uploaded
+										<svg class="w-4 h-4 text-slate-400 sort-indicator" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+										</svg>
+									</div>
 								</th>
-								<th class="px-4 py-3 border-b">Actions</th>
+								<th class="px-6 py-4 text-right font-semibold text-slate-700">Actions</th>
 							</tr>
 						</thead>
-						<tbody id="fileTable" class="divide-y divide-gray-200"></tbody>
+						<tbody id="fileTable" class="divide-y divide-slate-100"></tbody>
 					</table>
 				</div>
 
-				<!-- Loading indicator -->
-				<div id="loadingIndicator" class="text-center py-8">
-					<div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-					<p class="mt-2 text-gray-600">Loading files...</p>
+				<!-- Loading Indicator -->
+				<div id="loadingIndicator" class="flex items-center justify-center py-16">
+					<div class="text-center">
+						<div class="spinner-premium w-10 h-10 mx-auto mb-4"></div>
+						<p class="text-slate-500">Loading files...</p>
+					</div>
 				</div>
 
-				<!-- Empty state -->
-				<div id="emptyState" class="hidden text-center py-12">
-					<div class="text-gray-400 mb-4">
-						<svg class="mx-auto h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.98 1.98 0 013 12V7a4 4 0 014-4z"
-							/>
-						</svg>
+				<!-- Empty State -->
+				<div id="emptyState" class="hidden py-16">
+					<div class="text-center">
+						<div class="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+							<svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.98 1.98 0 013 12V7a4 4 0 014-4z" />
+							</svg>
+						</div>
+						<h3 class="text-lg font-semibold text-slate-800 mb-1">No files found</h3>
+						<p class="text-slate-500 mb-6">Upload some files or adjust your search criteria.</p>
+						<a href="admin.html" class="btn-premium inline-flex items-center gap-2">
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+							</svg>
+							Upload Your First File
+						</a>
 					</div>
-					<h3 class="text-lg font-medium text-gray-900 mb-1">No files found</h3>
-					<p class="text-gray-500">Upload some files or adjust your search criteria.</p>
 				</div>
 			</div>
 		</div>
+
+		<!-- Footer -->
+		<footer class="border-t border-slate-200 mt-12 py-6">
+			<div class="max-w-7xl mx-auto px-6">
+				<div class="flex flex-col sm:flex-row items-center justify-between gap-4 mb-4">
+					<div class="flex items-center gap-2 text-slate-500 text-sm">
+						<div class="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+							<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+							</svg>
+						</div>
+						CloudVault — Enterprise File Sharing
+					</div>
+					<a href="https://github.com/DavidJKTofan/cf-file-sharing-platform" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-slate-600 transition flex items-center gap-2 text-sm">
+						<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+							<path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd" />
+						</svg>
+						GitHub
+					</a>
+				</div>
+				<div class="pt-4 border-t border-slate-200 text-center">
+					<p class="text-slate-500 text-xs">
+						<svg class="w-4 h-4 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+						</svg>
+						<strong>Disclaimer:</strong> For educational purposes only. Not intended for production use without proper security review.
+					</p>
+				</div>
+			</div>
+		</footer>
 
 		<script src="/js/download.js" defer></script>
 	</body>

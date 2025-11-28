@@ -125,7 +125,16 @@ document.addEventListener('DOMContentLoaded', () => {
 			const json = await res.json();
 			currentUser = json.extractedUser || { email: 'unknown', roles: [] };
 			if (userEmailEl) userEmailEl.textContent = currentUser.email || 'unknown';
-			if (userRolesEl) userRolesEl.textContent = currentUser.roles && currentUser.roles.length ? currentUser.roles.join(', ') : 'no roles';
+			if (userRolesEl) {
+				const rolesText = currentUser.roles && currentUser.roles.length ? currentUser.roles.join(', ') : 'no roles';
+				userRolesEl.textContent = rolesText;
+			}
+			// Set user initial
+			const userInitialEl = document.getElementById('userInitial');
+			if (userInitialEl && currentUser.email) {
+				const initial = currentUser.email.charAt(0).toUpperCase();
+				userInitialEl.textContent = initial;
+			}
 			applyRoleVisibility();
 		} catch (err) {
 			console.error('loadUserInfo', err);

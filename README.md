@@ -96,9 +96,6 @@ Admin Dashboard
 File Manager Admin View
 ![File Manager Admin Role](public/images/file-manager.png)
 
-File Manager Public View
-![File Manager Public Role](public/images/file-manager-public.png)
-
 ## Quick Deploy
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/DavidJKTofan/cloudflare-file-sharing-platform)
@@ -253,7 +250,7 @@ To prevent abuse or dictionary attacks, we recommend deploying a [Rate Limiting]
 - `/api/admin/r2-info` - R2 dashboard access
 - `/api/debug/jwt` – debug Access token
 
-> **To-Do:** Protect `/admin` and `/api/admin` endpoints with [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/).
+> **To-Do:** Protect `/admin` and `/api/admin` endpoints with [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/). Additionally, edit the logout URL endpoint (`<your-team-name>.cloudflareaccess.com/cdn-cgi/access/logout`) in the `admin.html` file.
 
 **Public Paths:**
 

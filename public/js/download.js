@@ -55,25 +55,25 @@ document.addEventListener('DOMContentLoaded', () => {
 	}
 
 	function formatExpiration(expirationString) {
-		if (!expirationString) return '<span class="text-gray-400 text-xs">Never</span>';
+		if (!expirationString) return '<span class="text-slate-400 text-xs">Never</span>';
 		try {
 			const expirationDate = new Date(expirationString);
 			const now = new Date();
 			if (expirationDate <= now) {
-				return '<span class="text-red-600 font-medium text-xs">⚠️ EXPIRED</span>';
+				return '<span class="badge badge-danger text-[10px] py-0.5">⚠️ EXPIRED</span>';
 			}
 			const diffMs = expirationDate.getTime() - now.getTime();
 			const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 			const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
 			const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
 			let countdown = '',
-				colorClass = 'text-green-600';
+				colorClass = 'text-emerald-600';
 			if (diffDays > 7) {
 				countdown = `${diffDays} days`;
-				colorClass = 'text-green-600';
+				colorClass = 'text-emerald-600';
 			} else if (diffDays > 1) {
 				countdown = `${diffDays} days, ${diffHours}h`;
-				colorClass = 'text-yellow-600';
+				colorClass = 'text-amber-600';
 			} else if (diffDays === 1) {
 				countdown = `1 day, ${diffHours}h`;
 				colorClass = 'text-orange-600';
@@ -84,9 +84,9 @@ document.addEventListener('DOMContentLoaded', () => {
 				countdown = `${diffMinutes}m`;
 				colorClass = 'text-red-700';
 			}
-			return `<div class="text-xs"><div class="${colorClass} font-medium">⏰ ${countdown}</div><div class="text-gray-500">${expirationDate.toLocaleString()}</div></div>`;
+			return `<div class="text-xs"><div class="${colorClass} font-semibold">⏰ ${countdown}</div><div class="text-slate-500">${expirationDate.toLocaleString()}</div></div>`;
 		} catch (e) {
-			return '<span class="text-gray-400 text-xs">Invalid Date</span>';
+			return '<span class="text-slate-400 text-xs">Invalid Date</span>';
 		}
 	}
 
@@ -96,8 +96,16 @@ document.addEventListener('DOMContentLoaded', () => {
 			const file = filteredFiles[idx];
 			if (!file) return;
 			if (file.expiration) {
-				const cell = row.cells[4]; // expiration column
-				if (cell) cell.innerHTML = formatExpiration(file.expiration);
+				const cell = row.cells[4]; // expiration column (filename, size, description, tags, expiration)
+				if (cell) {
+					const iconAndContent = cell.querySelector('div');
+					if (iconAndContent) {
+						const contentDiv = iconAndContent.querySelector('div:last-child');
+						if (contentDiv) {
+							contentDiv.innerHTML = formatExpiration(file.expiration);
+						}
+					}
+				}
 			}
 		});
 	}
@@ -218,53 +226,103 @@ document.addEventListener('DOMContentLoaded', () => {
 		filteredFiles.forEach((file) => {
 			const row = document.createElement('tr');
 			const isExpired = file.expiration && new Date(file.expiration) <= new Date();
-			row.className = `hover:bg-gray-50 transition ${isExpired ? 'bg-red-50 border-l-4 border-red-400' : ''}`;
+			row.className = isExpired ? 'bg-red-50/50 border-l-2 border-red-400' : '';
 
 			const uploadTypeBadge =
 				file.uploadType === 'multipart'
-					? '<span class="inline-block px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full ml-1">Multipart</span>'
+					? '<span class="badge badge-info ml-2 text-[10px] py-0.5">Multipart</span>'
 					: '';
 
 			row.innerHTML = `
-        <td class="px-4 py-3 border-b">
-          <div class="font-medium text-gray-900">${escapeHtml(file.filename || 'Unknown')}</div>
-          <div class="text-xs text-gray-500">ID: ${escapeHtml(file.fileId)} ${uploadTypeBadge}</div>
-        </td>
-        <td class="px-4 py-3 border-b"><span class="font-mono text-sm">${formatFileSize(file.size)}</span></td>
-        <td class="px-4 py-3 border-b"><span class="text-gray-700" title="${escapeHtml(file.description || '')}">${escapeHtml(
-					truncateText(file.description || ''),
-				)}</span></td>
-        <td class="px-4 py-3 border-b">
-          <div class="flex flex-wrap gap-1">
-            ${
-							file.tags
-								? escapeHtml(file.tags)
-										.split(',')
-										.map(
-											(t) =>
-												`<span class="inline-block px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">${escapeHtml(
-													t.trim(),
-												)}</span>`,
-										)
-										.join('')
-								: '<span class="text-gray-400 text-xs">No tags</span>'
-						}
+        <td class="px-6 py-4">
+          <div class="flex items-start gap-2">
+            <div class="flex-1 min-w-0">
+              <div class="font-semibold text-slate-800 truncate">${escapeHtml(file.filename || 'Unknown')}</div>
+              <div class="text-xs text-slate-500 mt-1 truncate">ID: ${escapeHtml(file.fileId)} ${uploadTypeBadge}</div>
+              ${
+								file.description
+									? `<div class="lg:hidden mt-2 text-xs text-slate-600 italic line-clamp-2" title="${escapeHtml(file.description)}">
+                      <svg class="w-3 h-3 text-indigo-400 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      ${escapeHtml(truncateText(file.description, 80))}
+                    </div>`
+									: ''
+							}
+            </div>
           </div>
         </td>
-        <td class="px-4 py-3 border-b">${formatExpiration(file.expiration)}</td>
-        <td class="px-4 py-3 border-b"><span class="text-sm text-gray-600">${formatDate(file.uploadedAt)}</span></td>
-        <td class="px-4 py-3 border-b">
-          <div class="flex gap-2">
+        <td class="px-6 py-4"><span class="font-mono text-sm text-slate-700">${formatFileSize(file.size)}</span></td>
+        <td class="px-6 py-4 hidden lg:table-cell bg-indigo-50/30">
+          <div class="flex items-start gap-2">
+            <svg class="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <span class="text-slate-700 text-sm font-medium" title="${escapeHtml(file.description || '')}">${escapeHtml(
+					truncateText(file.description || 'No description'),
+				)}</span>
+          </div>
+        </td>
+        <td class="px-6 py-4 hidden lg:table-cell bg-purple-50/30">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.98 1.98 0 013 12V7a4 4 0 014-4z" />
+            </svg>
+            <div class="flex flex-wrap gap-1.5">
+              ${
+								file.tags
+									? escapeHtml(file.tags)
+											.split(',')
+											.map(
+												(t) =>
+													`<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 border border-purple-200">${escapeHtml(
+														t.trim(),
+													)}</span>`,
+											)
+											.join('')
+									: '<span class="text-slate-400 text-xs font-medium">No tags</span>'
+							}
+            </div>
+          </div>
+        </td>
+        <td class="px-6 py-4 hidden sm:table-cell bg-amber-50/30">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>${formatExpiration(file.expiration)}</div>
+          </div>
+        </td>
+        <td class="px-6 py-4 hidden sm:table-cell bg-emerald-50/30">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <span class="text-sm font-semibold text-slate-700">${formatDate(file.uploadedAt)}</span>
+          </div>
+        </td>
+        <td class="px-6 py-4 text-right">
+          <div class="flex gap-2 justify-end">
             ${
 							isExpired
-								? '<span class="px-3 py-1 bg-red-100 text-red-700 text-xs rounded-sm border">🚫 Expired</span>'
+								? '<span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-100 text-red-700 text-xs font-medium rounded-lg border border-red-200">🚫 Expired</span>'
 								: `<a href="${file.downloadUrl}?filename=${encodeURIComponent(
 										file.filename,
-								  )}" target="_blank" class="inline-block px-3 py-1 bg-blue-600 text-white text-xs rounded-sm hover:bg-blue-700 transition">📥 Download</a>`
+								  )}" target="_blank" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-xs font-medium rounded-lg hover:from-indigo-600 hover:to-purple-700 transition shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download
+                  </a>`
 						}
             <button data-action="copy-id" data-file-id="${escapeHtml(
 							file.fileId,
-						)}" class="px-3 py-1 bg-gray-500 text-white text-xs rounded-sm hover:bg-gray-600 transition">📋 Copy ID</button>
+						)}" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-200 transition">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              Copy ID
+            </button>
           </div>
         </td>
       `;
