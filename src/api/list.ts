@@ -1,12 +1,10 @@
 /**
- * @fileoverview File listing handlers for public and admin views.
+ * @fileoverview File listing handlers for public and admin views using D1.
  *
  * Provides endpoints for:
  * - Public file listings (filtered by visibility and expiration)
  * - Admin file listings (with statistics and all files)
  * - Expired file cleanup
- *
- * @module api/list
  */
 
 import { HTTPException } from 'hono/http-exception';
@@ -19,91 +17,68 @@ import { isAdmin } from '../auth';
 // Validation Schemas
 // ============================================================================
 
-/**
- * Schema for public list query parameters.
- */
 const listQuerySchema = z.object({
-	/** Search term for filtering by filename, description, or tags */
 	search: z.string().max(200).optional(),
-	/** Maximum number of files to return (1-100) */
-	limit: z.coerce.number().int().min(1).max(100).default(100),
-	/** Pagination cursor for fetching next page */
+	limit: z.coerce.number().int().min(1).max(100).default(50),
 	cursor: z.string().optional(),
+	sortBy: z.enum(['uploadedAt', 'size', 'filename']).default('uploadedAt'),
+	sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
 
-/**
- * Schema for admin list query parameters.
- * Extends public schema with additional filter options.
- */
 const adminListQuerySchema = listQuerySchema.extend({
-	/** Include expired files in results (default: true) */
-	includeExpired: z.preprocess(
-		(v) => String(v) !== 'false',
-		z.boolean().default(true)
-	),
-	/** Include hidden files in results (default: true) */
-	includeHidden: z.preprocess(
-		(v) => String(v) !== 'false',
-		z.boolean().default(true)
-	),
+	includeExpired: z.preprocess((v) => String(v) !== 'false', z.boolean().default(true)),
+	includeHidden: z.preprocess((v) => String(v) !== 'false', z.boolean().default(true)),
 });
 
-/** Inferred type for filter options */
 type ListFilterOptions = z.infer<typeof adminListQuerySchema>;
 
 // ============================================================================
 // Types
 // ============================================================================
 
-/** Statistics for admin file listing */
 interface FileStats {
 	totalFiles: number;
 	totalSize: number;
-	averageSize: number;
-	largestFileSize: number;
 	expiredFiles: number;
 	hiddenFiles: number;
 	publicFiles: number;
 }
 
-/** Result from getFilteredFiles */
 interface FilteredFilesResult {
 	files: FileListItem[];
+	nextCursor?: string;
 }
 
 // ============================================================================
 // Public List Handler
 // ============================================================================
 
-/**
- * Handles public file listing requests.
- *
- * @remarks
- * Returns only publicly visible files:
- * - Excludes hidden files
- * - Excludes expired files
- * - Excludes files requiring roles the user doesn't have
- *
- * @param c - Hono context with environment bindings and optional user
- * @returns JSON response with file list
- */
-export async function handleList(
-	c: Context<{ Bindings: Env; Variables: { user?: User } }>
-): Promise<Response> {
+export async function handleList(c: Context<{ Bindings: Env; Variables: { user?: User } }>): Promise<Response> {
 	const { logger } = c.env;
+	const user = c.get('user');
 	const query = listQuerySchema.parse(c.req.query());
 
-	logger.debug('Public file list requested', { search: query.search, limit: query.limit });
+	logger.info('[LIST] Public file list requested', {
+		...query,
+		user: user?.email || 'anonymous',
+		roles: user?.roles || ['public'],
+	});
 
-	const result = await getFilteredFiles(c, {
+	const result = await getFilteredFilesFromD1(c, {
 		...query,
 		includeExpired: false,
 		includeHidden: false,
 	});
 
+	logger.info('[LIST] Public list returning', {
+		filesCount: result.files.length,
+		hasNextCursor: !!result.nextCursor,
+	});
+
 	return c.json({
 		success: true,
 		files: result.files,
+		nextCursor: result.nextCursor,
 	});
 }
 
@@ -111,329 +86,305 @@ export async function handleList(
 // Admin List Handler
 // ============================================================================
 
-/**
- * Handles admin file listing requests with statistics.
- *
- * @remarks
- * Returns all files with comprehensive statistics:
- * - Total file count and size
- * - Expired and hidden file counts
- * - Supports filtering via query parameters
- *
- * @param c - Hono context with environment bindings and authenticated user
- * @returns JSON response with file list and statistics
- */
-export async function handleAdminList(
-	c: Context<{ Bindings: Env; Variables: { user: User } }>
-): Promise<Response> {
-	const { logger } = c.env;
+export async function handleAdminList(c: Context<{ Bindings: Env; Variables: { user: User } }>): Promise<Response> {
+	const { logger, DB } = c.env;
+	const user = c.get('user');
 	const query = adminListQuerySchema.parse(c.req.query());
 
-	logger.debug('Admin file list requested', {
-		search: query.search,
-		includeExpired: query.includeExpired,
-		includeHidden: query.includeHidden,
+	logger.info('[LIST] Admin file list requested', {
+		...query,
+		user: user.email,
 	});
 
-	// Get all files to calculate comprehensive stats
-	const allFilesResult = await getFilteredFiles(
-		c as Context<{ Bindings: Env; Variables: { user?: User } }>,
-		{
-			limit: 1000,
-			includeExpired: true,
-			includeHidden: true,
-		}
-	);
+	const [stats, filteredResult] = await Promise.all([calculateStats(DB, logger), getFilteredFilesFromD1(c, query)]);
 
-	const allFiles = allFilesResult.files;
-	const stats = calculateStats(allFiles);
-
-	// Get filtered files for display based on query params
-	const filteredResult = await getFilteredFiles(
-		c as Context<{ Bindings: Env; Variables: { user?: User } }>,
-		query
-	);
-
-	logger.info('Admin file list returned', {
+	logger.info('[LIST] Admin list returning', {
 		totalFiles: stats.totalFiles,
 		filteredCount: filteredResult.files.length,
+		stats,
 	});
 
 	return c.json({
 		success: true,
 		files: filteredResult.files,
 		stats,
+		nextCursor: filteredResult.nextCursor,
 	});
 }
 
-/**
- * Calculates statistics from a list of files.
- *
- * @param files - Array of file list items
- * @returns Computed statistics
- */
-function calculateStats(files: FileListItem[]): FileStats {
-	const totalSize = files.reduce((sum, file) => sum + file.size, 0);
-	const expiredCount = files.filter((f) => f.isExpired).length;
-	const hiddenCount = files.filter((f) => f.hideFromList).length;
+async function calculateStats(db: D1Database, logger: any): Promise<FileStats> {
+	const now = new Date().toISOString();
 
-	return {
-		totalFiles: files.length,
-		totalSize,
-		averageSize: files.length > 0 ? Math.round(totalSize / files.length) : 0,
-		largestFileSize: files.length > 0 ? Math.max(...files.map((f) => f.size)) : 0,
-		expiredFiles: expiredCount,
-		hiddenFiles: hiddenCount,
-		publicFiles: files.length - hiddenCount,
-	};
+	logger.debug('[STATS] Calculating file statistics');
+
+	try {
+		const results = await db
+			.prepare(
+				`SELECT
+					COUNT(*) as totalFiles,
+					COALESCE(SUM(size), 0) as totalSize,
+					COUNT(CASE WHEN expiration IS NOT NULL AND expiration <= ?1 THEN 1 END) as expiredFiles,
+					COUNT(CASE WHEN hideFromList = 1 THEN 1 END) as hiddenFiles,
+					COUNT(CASE WHEN hideFromList = 0 THEN 1 END) as publicFiles
+				FROM files`
+			)
+			.bind(now)
+			.first<{
+				totalFiles: number;
+				totalSize: number;
+				expiredFiles: number;
+				hiddenFiles: number;
+				publicFiles: number;
+			}>();
+
+		const stats = {
+			totalFiles: results?.totalFiles ?? 0,
+			totalSize: results?.totalSize ?? 0,
+			expiredFiles: results?.expiredFiles ?? 0,
+			hiddenFiles: results?.hiddenFiles ?? 0,
+			publicFiles: results?.publicFiles ?? 0,
+		};
+
+		logger.debug('[STATS] Statistics calculated', { stats });
+
+		return stats;
+	} catch (error) {
+		logger.error('[STATS] Failed to calculate stats', {
+			error: error instanceof Error ? error.message : 'Unknown error',
+		});
+
+		// Return empty stats on error
+		return {
+			totalFiles: 0,
+			totalSize: 0,
+			expiredFiles: 0,
+			hiddenFiles: 0,
+			publicFiles: 0,
+		};
+	}
 }
 
 // ============================================================================
 // Shared File Filtering
 // ============================================================================
 
-/**
- * Fetches and filters files from R2 based on options.
- *
- * @remarks
- * Applies multiple filters:
- * - Hidden file visibility
- * - Expiration status
- * - Role-based access
- * - Search term matching
- *
- * @param c - Hono context
- * @param options - Filter options
- * @returns Filtered and sorted file list
- */
-async function getFilteredFiles(
+async function getFilteredFilesFromD1(
 	c: Context<{ Bindings: Env; Variables: { user?: User } }>,
 	options: ListFilterOptions
 ): Promise<FilteredFilesResult> {
-	const { env } = c;
-	const { logger } = env;
+	const { DB, logger } = c.env;
 	const caller = c.get('user');
-	const { search, limit, cursor, includeExpired, includeHidden } = options;
-
-	logger.debug('Fetching files from R2', { limit, cursor: !!cursor });
-
-	// Build R2 list options
-	const listOptions: R2ListOptions = {
-		limit: Math.min(limit, 1000),
-		cursor,
-		include: ['customMetadata'],
-	};
-
-	const listResult = await env.R2_FILES.list(listOptions);
-	const files: FileListItem[] = [];
-	const now = new Date();
-	const callerRoles = caller?.roles ?? [];
+	const { search, limit, cursor, sortBy, sortOrder, includeExpired, includeHidden } = options;
 	const callerIsAdmin = isAdmin(caller);
+	const callerRoles = caller?.roles ?? [];
+	const now = new Date().toISOString();
 
-	// Process each R2 object
-	for (const object of listResult.objects) {
-		const fileItem = await processR2Object(env, object, {
-			now,
-			callerRoles,
-			callerIsAdmin,
-			includeExpired,
-			includeHidden,
-			search,
-		});
-
-		if (fileItem) {
-			files.push(fileItem);
-		}
-	}
-
-	// Sort by upload date (newest first)
-	files.sort((a, b) => {
-		const dateA = new Date(a.uploadedAt).getTime();
-		const dateB = new Date(b.uploadedAt).getTime();
-		return dateB - dateA;
+	logger.debug('[FILTER] Building query', {
+		callerEmail: caller?.email || 'anonymous',
+		callerIsAdmin,
+		callerRoles,
+		includeExpired,
+		includeHidden,
+		search,
+		limit,
 	});
 
-	return { files };
-}
+	let query = 'SELECT * FROM files';
+	const whereClauses: string[] = [];
+	const bindings: (string | number)[] = [];
 
-/** Options for processing individual R2 objects */
-interface ProcessObjectOptions {
-	now: Date;
-	callerRoles: string[];
-	callerIsAdmin: boolean;
-	includeExpired: boolean;
-	includeHidden: boolean;
-	search?: string;
-}
+	if (!includeExpired) {
+		whereClauses.push('(expiration IS NULL OR expiration > ?)');
+		bindings.push(now);
+		logger.debug('[FILTER] Excluding expired files', { now });
+	}
 
-/**
- * Processes a single R2 object into a FileListItem.
- *
- * @param env - Environment bindings
- * @param object - R2 object from list
- * @param options - Processing options
- * @returns FileListItem or null if filtered out
- */
-async function processR2Object(
-	env: Env,
-	object: R2Object,
-	options: ProcessObjectOptions
-): Promise<FileListItem | null> {
-	const { now, callerRoles, callerIsAdmin, includeExpired, includeHidden, search } = options;
+	if (!includeHidden) {
+		whereClauses.push('hideFromList = 0');
+		logger.debug('[FILTER] Excluding hidden files');
+	}
 
-	// Parse object key
-	const keyParts = object.key.split('/');
-	const fileId = keyParts[0];
-	const filename = keyParts.slice(1).join('/') || 'Unknown';
-
-	// Fetch KV metadata if available
-	let kvMetadata: Record<string, unknown> = {};
-	if (env.FILE_METADATA) {
-		try {
-			const kvData = await env.FILE_METADATA.get(`file:${fileId}`);
-			if (kvData) {
-				kvMetadata = JSON.parse(kvData);
-			}
-		} catch {
-			// Ignore KV parse errors
+	if (!callerIsAdmin) {
+		if (callerRoles.length > 0) {
+			whereClauses.push(`(requiredRole IS NULL OR requiredRole IN (${callerRoles.map(() => '?').join(',')}))`);
+			bindings.push(...callerRoles);
+			logger.debug('[FILTER] Role-based filtering', { callerRoles });
+		} else {
+			whereClauses.push('requiredRole IS NULL');
+			logger.debug('[FILTER] Public access only (no roles)');
 		}
+	} else {
+		logger.debug('[FILTER] Admin access - no role restrictions');
 	}
 
-	// Merge metadata from R2 and KV
-	const metadata = { ...object.customMetadata, ...kvMetadata };
-
-	// Check hidden status
-	const isHidden = metadata.hideFromList === 'true' || metadata.hideFromList === true;
-	if (isHidden && !includeHidden) {
-		return null;
-	}
-
-	// Check role requirement
-	const requiredRole = (metadata.requiredRole ?? metadata.requiredrole) as string | undefined;
-	if (requiredRole && !callerIsAdmin && !callerRoles.includes(requiredRole)) {
-		return null;
-	}
-
-	// Check expiration
-	const expirationString = (metadata.expiration as string) ?? '';
-	let isExpired = false;
-	if (expirationString) {
-		const expirationDate = new Date(expirationString);
-		isExpired = expirationDate <= now;
-	}
-	if (isExpired && !includeExpired) {
-		return null;
-	}
-
-	// Apply search filter
 	if (search) {
-		const searchLower = search.toLowerCase();
-		const searchableText = [
-			filename,
-			metadata.description as string,
-			metadata.tags as string,
-		]
-			.filter(Boolean)
-			.join(' ')
-			.toLowerCase();
-
-		if (!searchableText.includes(searchLower)) {
-			return null;
-		}
+		whereClauses.push('(filename LIKE ? OR description LIKE ? OR tags LIKE ?)');
+		const searchTerm = `%${search}%`;
+		bindings.push(searchTerm, searchTerm, searchTerm);
+		logger.debug('[FILTER] Search filter applied', { search });
 	}
 
-	// Build file list item
-	return {
-		fileId,
-		filename,
-		description: (metadata.description as string) ?? '',
-		tags: (metadata.tags as string) ?? '',
-		expiration: expirationString,
-		checksum: (metadata.checksum as string) ?? '',
-		uploadedAt:
-			(metadata.uploadedAt as string) ?? object.uploaded?.toISOString() ?? '',
-		size: object.size,
-		contentType: object.httpMetadata?.contentType ?? 'application/octet-stream',
-		uploadType: (metadata.uploadType as string) ?? 'unknown',
-		downloadUrl: `/api/download/${fileId}`,
-		isExpired,
-		hideFromList: isHidden,
-		requiredRole: requiredRole ?? null,
-	};
+	if (whereClauses.length > 0) {
+		query += ' WHERE ' + whereClauses.join(' AND ');
+	}
+
+	query += ` ORDER BY ${sortBy} ${sortOrder.toUpperCase()}, id ${sortOrder.toUpperCase()}`;
+
+	if (cursor) {
+		const offset = parseInt(cursor, 10);
+		query += ` OFFSET ${offset}`;
+		logger.debug('[FILTER] Cursor offset applied', { offset });
+	}
+
+	query += ` LIMIT ?`;
+	bindings.push(limit);
+
+	logger.debug('[FILTER] Executing D1 query', {
+		query,
+		bindingsCount: bindings.length,
+		// Don't log actual bindings as they may be sensitive
+	});
+
+	try {
+		const { results } = await DB.prepare(query)
+			.bind(...bindings)
+			.all<any>();
+
+		logger.info('[FILTER] Query executed', {
+			resultCount: results?.length ?? 0,
+			limit,
+		});
+
+		if (!results || results.length === 0) {
+			logger.warn('[FILTER] No files found matching criteria', {
+				whereClauses,
+				search,
+				includeExpired,
+				includeHidden,
+			});
+
+			// Debug: Check if ANY files exist in the database
+			const totalCount = await DB.prepare('SELECT COUNT(*) as count FROM files').first<{ count: number }>();
+			logger.debug('[FILTER] Total files in database', {
+				totalCount: totalCount?.count ?? 0,
+			});
+		}
+
+		const files: FileListItem[] = results.map((row: any) => {
+			const isExpired = row.expiration ? new Date(row.expiration) <= new Date() : false;
+
+			return {
+				fileId: row.id,
+				filename: row.filename,
+				description: row.description,
+				tags: row.tags,
+				expiration: row.expiration,
+				checksum: row.checksum,
+				uploadedAt: row.uploadedAt,
+				size: row.size,
+				contentType: row.contentType,
+				uploadType: row.uploadType,
+				downloadUrl: `/api/download/${row.id}`,
+				isExpired,
+				hideFromList: Boolean(row.hideFromList),
+				requiredRole: row.requiredRole,
+			};
+		});
+
+		let nextCursor: string | undefined;
+		if (files.length === limit) {
+			const currentOffset = cursor ? parseInt(cursor, 10) : 0;
+			nextCursor = (currentOffset + limit).toString();
+			logger.debug('[FILTER] Next cursor generated', { nextCursor });
+		}
+
+		return { files, nextCursor };
+	} catch (error) {
+		logger.error(
+			'[FILTER] D1 query failed',
+			{
+				error: error instanceof Error ? error.message : 'Unknown error',
+				query,
+				stack: error instanceof Error ? error.stack : undefined,
+			},
+			error instanceof Error ? error : undefined
+		);
+
+		throw new HTTPException(500, {
+			message: 'Failed to retrieve file list',
+			cause: error,
+		});
+	}
 }
 
 // ============================================================================
 // Cleanup Handler
 // ============================================================================
 
-/**
- * Cleans up expired files from R2 and KV.
- *
- * @remarks
- * Iterates through all files in R2, identifies expired ones based on
- * their expiration metadata, and deletes them. Also removes corresponding
- * KV metadata entries.
- *
- * @param c - Hono context with environment bindings and authenticated user
- * @returns JSON response with count of deleted files
- */
-export async function cleanupExpiredFiles(
-	c: Context<{ Bindings: Env; Variables: { user: User } }>
-): Promise<Response> {
-	const { env } = c;
-	const { logger } = env;
+export async function cleanupExpiredFiles(c: Context<{ Bindings: Env; Variables: { user: User } }>): Promise<Response> {
+	const { DB, R2_FILES, logger } = c.env;
+	const user = c.get('user');
+	const now = new Date().toISOString();
 
-	if (!env.R2_FILES) {
-		throw new HTTPException(500, { message: 'File storage is not configured.' });
-	}
+	logger.info('[CLEANUP] Starting expired file cleanup', {
+		initiatedBy: user.email,
+		timestamp: now,
+	});
 
-	logger.info('Starting expired file cleanup');
+	try {
+		const { results } = await DB.prepare('SELECT id, r2Key FROM files WHERE expiration IS NOT NULL AND expiration <= ?')
+			.bind(now)
+			.all<{ id: string; r2Key: string }>();
 
-	let deletedCount = 0;
-	let cursor: string | undefined;
-	const now = new Date();
-
-	// Iterate through all files in batches
-	do {
-		const listResult: R2Objects = await env.R2_FILES.list({
-			limit: 500,
-			cursor,
-			include: ['customMetadata'],
-		});
-
-		// Find expired files
-		const expiredKeys = listResult.objects
-			.filter((obj) => {
-				const expiration = obj.customMetadata?.expiration;
-				return expiration && new Date(expiration) <= now;
-			})
-			.map((obj) => obj.key);
-
-		// Delete expired files
-		if (expiredKeys.length > 0) {
-			logger.debug('Deleting expired files', { count: expiredKeys.length });
-
-			await env.R2_FILES.delete(expiredKeys);
-			deletedCount += expiredKeys.length;
-
-			// Clean up KV metadata
-			if (env.FILE_METADATA) {
-				const deletePromises = expiredKeys.map((key) => {
-					const fileId = key.split('/')[0];
-					return env.FILE_METADATA!.delete(`file:${fileId}`);
-				});
-				await Promise.all(deletePromises);
-			}
+		if (!results || results.length === 0) {
+			logger.info('[CLEANUP] No expired files found');
+			return c.json({ success: true, deletedCount: 0 });
 		}
 
-		cursor = listResult.truncated ? listResult.cursor : undefined;
-	} while (cursor);
+		logger.info('[CLEANUP] Found expired files', {
+			count: results.length,
+			fileIds: results.map((r) => r.id),
+		});
 
-	logger.info('Expired file cleanup completed', { deletedCount });
+		const expiredFileIds = results.map((r) => r.id);
+		const expiredR2Keys = results.map((r) => r.r2Key);
 
-	return c.json({
-		success: true,
-		deletedCount,
-		message: `Deleted ${deletedCount} expired file(s).`,
-	});
+		logger.debug('[CLEANUP] Deleting from D1 and R2', {
+			fileCount: expiredFileIds.length,
+		});
+
+		// Delete from D1 and R2 in parallel
+		const [d1Result] = await Promise.all([
+			DB.prepare(`DELETE FROM files WHERE id IN (${expiredFileIds.map(() => '?').join(',')})`)
+				.bind(...expiredFileIds)
+				.run(),
+			R2_FILES.delete(expiredR2Keys),
+		]);
+
+		logger.info('[CLEANUP] Cleanup completed', {
+			deletedCount: expiredFileIds.length,
+			d1Success: d1Result.success,
+			d1Meta: d1Result.meta,
+		});
+
+		return c.json({
+			success: true,
+			deletedCount: expiredFileIds.length,
+			message: `Deleted ${expiredFileIds.length} expired file(s).`,
+		});
+	} catch (error) {
+		logger.error(
+			'[CLEANUP] Cleanup failed',
+			{
+				error: error instanceof Error ? error.message : 'Unknown error',
+				stack: error instanceof Error ? error.stack : undefined,
+			},
+			error instanceof Error ? error : undefined
+		);
+
+		throw new HTTPException(500, {
+			message: 'Failed to cleanup expired files',
+			cause: error,
+		});
+	}
 }

@@ -3,34 +3,13 @@
  *
  * Implements the TUS protocol (https://tus.io/) for resumable file uploads
  * using Cloudflare Durable Objects with SQLite storage for state management.
- *
- * Architecture:
- * - Each upload gets its own Durable Object instance
- * - Upload state is persisted in SQLite within the Durable Object
- * - Automatic cleanup via Durable Object alarms
- * - R2 multipart uploads for efficient large file handling
- *
- * Supported TUS extensions:
- * - creation: Create new uploads
- * - creation-with-upload: Create and upload in single request
- * - expiration: Uploads expire after 7 days
- * - termination: Cancel/delete uploads
- *
- * @module api/upload-tus
- * @see {@link https://tus.io/protocols/resumable-upload}
  */
 
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { z } from 'zod';
 import type { Env, User } from '../types';
-import {
-	TUS_VERSION,
-	TUS_MAX_SIZE,
-	TUS_EXTENSIONS,
-	type CreateUploadResult,
-	type UploadPartResult,
-} from '../durable/TusUploadHandler';
+import { TUS_VERSION, TUS_MAX_SIZE, TUS_EXTENSIONS, type CreateUploadResult, type UploadPartResult } from '../durable/TusUploadHandler';
 
 // ============================================================================
 // Constants
@@ -64,10 +43,7 @@ const tusMetadataSchema = z.object({
 	tags: z.string().max(500).optional(),
 	expiration: z.string().optional(),
 	checksum: z.string().max(128).optional(),
-	hideFromList: z.preprocess(
-		(v) => String(v).toLowerCase() === 'true',
-		z.boolean().optional()
-	),
+	hideFromList: z.preprocess((v) => String(v).toLowerCase() === 'true', z.boolean().optional()),
 	requiredRole: z.string().max(50).optional(),
 });
 
@@ -96,15 +72,6 @@ type TusMetadata = z.infer<typeof tusMetadataSchema>;
 
 /**
  * Parses TUS Upload-Metadata header.
- *
- * @remarks
- * The Upload-Metadata header contains comma-separated key-value pairs
- * where values are base64-encoded.
- *
- * Format: `key1 base64value1,key2 base64value2`
- *
- * @param metadataHeader - Raw Upload-Metadata header value
- * @returns Parsed metadata object
  */
 function parseTusMetadata(metadataHeader: string): Record<string, string> {
 	const metadata: Record<string, string> = {};
@@ -131,10 +98,6 @@ function parseTusMetadata(metadataHeader: string): Record<string, string> {
 
 /**
  * Gets or creates a Durable Object stub for an upload.
- *
- * @param env - Environment with DO namespace
- * @param uploadId - Upload identifier
- * @returns Durable Object stub
  */
 function getUploadStub(env: Env, uploadId: string) {
 	const id = env.TUS_UPLOAD_HANDLER.idFromName(uploadId);
@@ -143,15 +106,8 @@ function getUploadStub(env: Env, uploadId: string) {
 
 /**
  * Builds custom metadata for R2 from TUS metadata.
- *
- * @param meta - Parsed TUS metadata
- * @param fileId - File identifier
- * @returns R2 custom metadata object
  */
-function buildR2Metadata(
-	meta: TusMetadata,
-	fileId: string
-): Record<string, string> {
+function buildR2Metadata(meta: TusMetadata, fileId: string): Record<string, string> {
 	const result: Record<string, string> = {
 		fileId,
 		originalName: meta.filename,
@@ -175,9 +131,6 @@ function buildR2Metadata(
 
 /**
  * Handles TUS OPTIONS requests (CORS preflight).
- *
- * @param c - Hono context
- * @returns 204 No Content with TUS headers
  */
 export async function handleTusOptions(c: Context): Promise<Response> {
 	return new Response(null, { status: 204, headers: TUS_HEADERS });
@@ -185,28 +138,17 @@ export async function handleTusOptions(c: Context): Promise<Response> {
 
 /**
  * Handles TUS upload creation (POST).
- *
- * @remarks
- * Creates a new resumable upload session using Durable Objects:
- * 1. Validates Upload-Length and Upload-Metadata headers
- * 2. Creates Durable Object instance for upload state
- * 3. Initiates R2 multipart upload via DO
- * 4. Returns Location header with upload URL
- *
- * @param c - Hono context with environment bindings and user
- * @returns 201 Created with Location header
- *
- * @throws {HTTPException} 400 - Invalid headers or metadata
- * @throws {HTTPException} 413 - Upload too large
  */
-export async function handleTusUploadCreation(
-	c: Context<{ Bindings: Env; Variables: { user: User } }>
-): Promise<Response> {
+export async function handleTusUploadCreation(c: Context<{ Bindings: Env; Variables: { user: User } }>): Promise<Response> {
 	const { req, env } = c;
 	const { config, logger } = env;
 	const user = c.get('user');
 
-	logger.debug('TUS upload creation requested', { uploader: user.email });
+	logger.info('[TUS] Upload creation requested', {
+		uploader: user.email,
+		sub: user.sub,
+		roles: user.roles,
+	});
 
 	// Validate required headers
 	const validatedHeaders = tusCreationHeadersSchema.safeParse({
@@ -215,19 +157,30 @@ export async function handleTusUploadCreation(
 	});
 
 	if (!validatedHeaders.success) {
-		logger.warn('Invalid TUS headers', { errors: validatedHeaders.error.flatten() });
+		logger.error('[TUS] Invalid headers', {
+			errors: validatedHeaders.error.flatten(),
+			headers: {
+				'upload-length': req.header('Upload-Length'),
+				'upload-metadata': req.header('Upload-Metadata'),
+			},
+		});
 		throw new HTTPException(400, {
 			message: 'Invalid TUS headers',
 			cause: validatedHeaders.error,
 		});
 	}
 
-	const { 'upload-length': uploadLength, 'upload-metadata': metadataHeader } =
-		validatedHeaders.data;
+	const { 'upload-length': uploadLength, 'upload-metadata': metadataHeader } = validatedHeaders.data;
+
+	logger.debug('[TUS] Parsed headers', { uploadLength, metadataHeader });
 
 	// Validate upload size
 	if (uploadLength > TUS_MAX_SIZE) {
-		logger.warn('TUS upload too large', { size: uploadLength, max: TUS_MAX_SIZE });
+		logger.warn('[TUS] Upload too large', {
+			size: uploadLength,
+			max: TUS_MAX_SIZE,
+			user: user.email,
+		});
 		throw new HTTPException(413, {
 			message: `Upload exceeds maximum size of ${TUS_MAX_SIZE / 1024 / 1024 / 1024}GB`,
 		});
@@ -235,10 +188,15 @@ export async function handleTusUploadCreation(
 
 	// Parse and validate metadata
 	const parsedMeta = parseTusMetadata(metadataHeader ?? '');
+	logger.debug('[TUS] Parsed metadata', { parsedMeta });
+
 	const validatedMeta = tusMetadataSchema.safeParse(parsedMeta);
 
 	if (!validatedMeta.success) {
-		logger.warn('Invalid Upload-Metadata', { errors: validatedMeta.error.flatten() });
+		logger.error('[TUS] Invalid Upload-Metadata', {
+			errors: validatedMeta.error.flatten(),
+			parsedMeta,
+		});
 		throw new HTTPException(400, {
 			message: 'Invalid Upload-Metadata',
 			cause: validatedMeta.error,
@@ -251,69 +209,84 @@ export async function handleTusUploadCreation(
 	const uploadId = crypto.randomUUID();
 	const r2Key = `${uploadId}/${meta.filename}`;
 
-	logger.info('Creating TUS upload', {
+	logger.info('[TUS] Creating upload', {
 		uploadId,
 		filename: meta.filename,
 		size: uploadLength,
 		uploader: user.email,
+		ownerId: user.sub,
+		r2Key,
+		metadata: meta,
 	});
 
 	// Create upload via Durable Object
 	const stub = getUploadStub(env, uploadId);
-	const result: CreateUploadResult = await stub.createUpload({
-		r2Key,
-		totalSize: uploadLength,
-		filename: meta.filename,
-		contentType: meta.contentType,
-		customMetadata: buildR2Metadata(meta, uploadId),
-	});
 
-	// Build response headers
-	const location = `${config.APP_URL}/api/upload/tus/${uploadId}`;
-	const expiresAt = new Date(result.expiresAt).toISOString();
+	try {
+		const result: CreateUploadResult = await stub.createUpload({
+			r2Key,
+			totalSize: uploadLength,
+			filename: meta.filename,
+			contentType: meta.contentType,
+			customMetadata: buildR2Metadata(meta, uploadId),
+			ownerId: user.sub, // FIX: Pass ownerId to Durable Object
+		});
 
-	const headers: Record<string, string> = {
-		...TUS_HEADERS,
-		Location: location,
-		'Upload-Offset': '0',
-		'Upload-Expires': expiresAt,
-	};
+		logger.info('[TUS] Upload created successfully', {
+			uploadId,
+			action: result.action,
+			uploadedSize: result.uploadedSize,
+			expiresAt: result.expiresAt,
+		});
 
-	logger.debug('TUS upload created', {
-		uploadId,
-		location,
-		action: result.action,
-	});
+		// Build response headers
+		const location = `${config.APP_URL}/api/upload/tus/${uploadId}`;
+		const expiresAt = new Date(result.expiresAt).toISOString();
 
-	return new Response(null, { status: 201, headers });
+		const headers: Record<string, string> = {
+			...TUS_HEADERS,
+			Location: location,
+			'Upload-Offset': '0',
+			'Upload-Expires': expiresAt,
+		};
+
+		return new Response(null, { status: 201, headers });
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+		logger.error(
+			'[TUS] Failed to create upload',
+			{
+				uploadId,
+				error: errorMessage,
+				stack: error instanceof Error ? error.stack : undefined,
+			},
+			error instanceof Error ? error : undefined
+		);
+
+		throw new HTTPException(500, {
+			message: 'Failed to create upload',
+			cause: error,
+		});
+	}
 }
 
 /**
  * Handles TUS chunk upload (PATCH).
- *
- * @remarks
- * Uploads a chunk of file data via Durable Object:
- * 1. Validates Upload-Offset header matches server state
- * 2. Forwards chunk to Durable Object for R2 upload
- * 3. Returns new offset in response
- *
- * @param c - Hono context with environment bindings and user
- * @returns 204 No Content with Upload-Offset header
- *
- * @throws {HTTPException} 409 - Offset mismatch (resume required)
- * @throws {HTTPException} 404 - Upload not found
  */
-export async function handleTusUploadChunk(
-	c: Context<{ Bindings: Env; Variables: { user: User } }>
-): Promise<Response> {
+export async function handleTusUploadChunk(c: Context<{ Bindings: Env; Variables: { user: User } }>): Promise<Response> {
 	const { req, env } = c;
-	const { config, logger } = env;
+	const { logger } = env;
+	const user = c.get('user');
 
 	// Validate parameters
 	const { fileId: uploadId } = fileIdParamSchema.parse(req.param());
 	const { 'upload-offset': clientOffset } = uploadOffsetSchema.parse(req.header());
 
-	logger.debug('TUS chunk upload', { uploadId, clientOffset });
+	logger.debug('[TUS] Chunk upload request', {
+		uploadId,
+		clientOffset,
+		user: user.email,
+	});
 
 	// Get Durable Object stub
 	const stub = getUploadStub(env, uploadId);
@@ -321,16 +294,24 @@ export async function handleTusUploadChunk(
 	// Check current status first
 	const status = await stub.getUploadStatus();
 	if (!status) {
-		logger.warn('TUS upload not found', { uploadId });
+		logger.error('[TUS] Upload not found', { uploadId, user: user.email });
 		throw new HTTPException(404, { message: 'Upload not found.' });
 	}
 
+	logger.debug('[TUS] Current upload status', {
+		uploadId,
+		uploadedSize: status.uploadedSize,
+		totalSize: status.totalSize,
+		isCompleted: status.isCompleted,
+	});
+
 	// Validate offset
 	if (clientOffset !== status.uploadedSize) {
-		logger.warn('TUS offset mismatch', {
+		logger.warn('[TUS] Offset mismatch', {
 			uploadId,
 			clientOffset,
 			serverOffset: status.uploadedSize,
+			user: user.email,
 		});
 		throw new HTTPException(409, {
 			message: `Offset mismatch: expected ${status.uploadedSize}`,
@@ -339,6 +320,7 @@ export async function handleTusUploadChunk(
 
 	// If already completed, return current state
 	if (status.isCompleted) {
+		logger.info('[TUS] Upload already completed', { uploadId });
 		return new Response(null, {
 			status: 204,
 			headers: {
@@ -351,29 +333,51 @@ export async function handleTusUploadChunk(
 	// Read chunk data
 	const body = await req.arrayBuffer();
 
-	logger.debug('Uploading chunk', {
+	logger.info('[TUS] Uploading chunk', {
 		uploadId,
 		chunkSize: body.byteLength,
 		currentOffset: clientOffset,
+		progress: `${((clientOffset / status.totalSize) * 100).toFixed(2)}%`,
 	});
 
 	// Upload chunk via Durable Object
 	try {
 		const result: UploadPartResult = await stub.uploadPart(clientOffset, body);
 
-		// If completed, store final metadata in KV for fast lookups
-		if (result.isCompleted && env.FILE_METADATA) {
-			const r2Key = `${uploadId}/${status.uploadId}`; // Will need to get from DO
-			await env.FILE_METADATA.put(
-				`file:${uploadId}`,
-				JSON.stringify({
-					fileId: uploadId,
-					size: status.totalSize,
-					uploadType: 'tus',
-					uploadedAt: new Date().toISOString(),
-				})
-			);
-			logger.info('TUS upload completed', { uploadId, totalSize: status.totalSize });
+		logger.info('[TUS] Chunk uploaded successfully', {
+			uploadId,
+			newOffset: result.uploadedSize,
+			isCompleted: result.isCompleted,
+			progress: `${((result.uploadedSize / status.totalSize) * 100).toFixed(2)}%`,
+		});
+
+		// If completed, verify D1 entry was created
+		if (result.isCompleted) {
+			logger.info('[TUS] Upload completed, verifying D1 entry', { uploadId });
+
+			// Wait a moment for D1 write to complete
+			await new Promise((resolve) => setTimeout(resolve, 100));
+
+			try {
+				const { results } = await env.DB.prepare('SELECT id, filename, size FROM files WHERE id = ?').bind(uploadId).all();
+
+				if (results && results.length > 0) {
+					logger.info('[TUS] D1 entry verified', {
+						uploadId,
+						fileData: results[0],
+					});
+				} else {
+					logger.error('[TUS] D1 entry NOT FOUND after completion', {
+						uploadId,
+						criticalError: true,
+					});
+				}
+			} catch (dbError) {
+				logger.error('[TUS] Failed to verify D1 entry', {
+					uploadId,
+					error: dbError instanceof Error ? dbError.message : 'Unknown error',
+				});
+			}
 		}
 
 		return new Response(null, {
@@ -385,7 +389,15 @@ export async function handleTusUploadChunk(
 		});
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Upload failed';
-		logger.error('TUS chunk upload failed', { uploadId, error: message });
+		logger.error(
+			'[TUS] Chunk upload failed',
+			{
+				uploadId,
+				error: message,
+				stack: error instanceof Error ? error.stack : undefined,
+			},
+			error instanceof Error ? error : undefined
+		);
 
 		if (message.includes('Offset mismatch')) {
 			throw new HTTPException(409, { message });
@@ -399,35 +411,30 @@ export async function handleTusUploadChunk(
 
 /**
  * Handles TUS upload status (HEAD).
- *
- * @remarks
- * Returns current upload state for resumption via Durable Object:
- * - Upload-Offset: Bytes uploaded so far
- * - Upload-Length: Total expected size
- *
- * @param c - Hono context with environment bindings and user
- * @returns 200 OK with upload status headers
- *
- * @throws {HTTPException} 404 - Upload not found
  */
-export async function handleTusUploadHead(
-	c: Context<{ Bindings: Env; Variables: { user: User } }>
-): Promise<Response> {
+export async function handleTusUploadHead(c: Context<{ Bindings: Env; Variables: { user: User } }>): Promise<Response> {
 	const { req, env } = c;
 	const { logger } = env;
 
 	const { fileId: uploadId } = fileIdParamSchema.parse(req.param());
 
-	logger.debug('TUS HEAD request', { uploadId });
+	logger.debug('[TUS] HEAD request', { uploadId });
 
 	// Get status from Durable Object
 	const stub = getUploadStub(env, uploadId);
 	const status = await stub.getUploadStatus();
 
 	if (!status) {
-		logger.warn('TUS upload not found for HEAD', { uploadId });
+		logger.warn('[TUS] Upload not found for HEAD', { uploadId });
 		throw new HTTPException(404, { message: 'Upload not found.' });
 	}
+
+	logger.debug('[TUS] Status retrieved', {
+		uploadId,
+		uploadedSize: status.uploadedSize,
+		totalSize: status.totalSize,
+		isCompleted: status.isCompleted,
+	});
 
 	const headers: Record<string, string> = {
 		...TUS_HEADERS,
@@ -446,35 +453,24 @@ export async function handleTusUploadHead(
 
 /**
  * Handles TUS upload deletion (DELETE).
- *
- * @remarks
- * Cancels an in-progress upload via Durable Object:
- * 1. Aborts R2 multipart upload (if not completed)
- * 2. Clears Durable Object storage
- *
- * @param c - Hono context with environment bindings and user
- * @returns 204 No Content
  */
-export async function handleTusUploadDelete(
-	c: Context<{ Bindings: Env; Variables: { user: User } }>
-): Promise<Response> {
+export async function handleTusUploadDelete(c: Context<{ Bindings: Env; Variables: { user: User } }>): Promise<Response> {
 	const { req, env } = c;
 	const { logger } = env;
 
 	const { fileId: uploadId } = fileIdParamSchema.parse(req.param());
 
-	logger.debug('TUS DELETE request', { uploadId });
+	logger.info('[TUS] DELETE request', { uploadId });
 
 	// Delete via Durable Object
 	const stub = getUploadStub(env, uploadId);
 
 	try {
 		await stub.deleteUpload();
-		logger.info('TUS upload deleted', { uploadId });
+		logger.info('[TUS] Upload deleted successfully', { uploadId });
 	} catch (error) {
-		// Log but don't fail - upload may already be deleted
 		const message = error instanceof Error ? error.message : 'Unknown error';
-		logger.debug('TUS delete may have failed (possibly already deleted)', {
+		logger.debug('[TUS] Delete may have failed (possibly already deleted)', {
 			uploadId,
 			error: message,
 		});

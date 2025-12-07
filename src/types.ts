@@ -66,11 +66,8 @@ export interface Env {
 	/** R2 bucket for file storage */
 	R2_FILES: R2Bucket;
 
-	/** KV namespace for file metadata caching (optional) */
-	FILE_METADATA?: KVNamespace;
-
-	/** D1 database for user role management (optional) */
-	ROLES_DB?: D1Database;
+	/** D1 database for application data (files, roles, etc.) */
+	DB: D1Database;
 
 	/** Durable Object namespace for TUS upload handling */
 	TUS_UPLOAD_HANDLER: DurableObjectNamespace<TusUploadHandler>;
@@ -130,64 +127,6 @@ export interface User {
 // ============================================================================
 // File Metadata Types
 // ============================================================================
-
-/**
- * Custom metadata stored with R2 objects.
- *
- * @remarks
- * This metadata is stored in R2's customMetadata field and optionally
- * cached in KV for faster access during list operations.
- */
-export interface FileCustomMetadata {
-	/** Unique file identifier (UUID) */
-	fileId: string;
-
-	/** User-provided file description */
-	description: string;
-
-	/** Comma-separated tags for categorization */
-	tags: string;
-
-	/** ISO 8601 expiration date (empty if no expiration) */
-	expiration: string;
-
-	/** File checksum for integrity verification */
-	checksum: string;
-
-	/** Original filename as uploaded */
-	originalName: string;
-
-	/** ISO 8601 upload timestamp */
-	uploadedAt: string;
-
-	/** Whether file is hidden from public listings */
-	hideFromList: string;
-
-	/** Role required to access this file (empty for public) */
-	requiredRole: string;
-
-	/** Upload method: 'multipart' or 'tus' */
-	uploadType: 'multipart' | 'tus' | string;
-
-	// -------------------------------------------------------------------------
-	// Request Context (captured at upload time)
-	// -------------------------------------------------------------------------
-
-	/** Autonomous System Number of uploader */
-	asn: string;
-
-	/** Country code of uploader */
-	country: string;
-
-	/** City of uploader */
-	city: string;
-
-	/** Timezone of uploader */
-	timezone: string;
-
-	/** User-Agent header of uploader */
-	userAgent: string;
-}
 
 /**
  * File list item returned by list endpoints.

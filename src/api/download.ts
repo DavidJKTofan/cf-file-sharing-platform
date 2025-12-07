@@ -6,8 +6,6 @@
  * - Expiration checking
  * - Presigned URLs in production (reduces Worker egress)
  * - Direct streaming in development
- *
- * @module api/download
  */
 
 import { HTTPException } from 'hono/http-exception';
@@ -21,14 +19,12 @@ import { isAdmin } from '../auth';
 // Constants
 // ============================================================================
 
-/** Presigned URL expiration time in seconds (10 minutes) */
 const PRESIGNED_URL_EXPIRY_SECONDS = 600;
 
 // ============================================================================
 // Validation Schemas
 // ============================================================================
 
-/** Schema for download route parameters */
 const downloadParamsSchema = z.object({
 	fileId: z.string().uuid({ message: 'Invalid file ID format' }),
 });
@@ -37,14 +33,13 @@ const downloadParamsSchema = z.object({
 // Types
 // ============================================================================
 
-/** Combined metadata from R2 and KV */
 interface FileMetadata {
-	r2Key?: string;
-	originalName?: string;
-	requiredRole?: string;
-	requiredrole?: string; // Legacy lowercase variant
-	expiration?: string;
-	checksum?: string;
+	id: string;
+	r2Key: string;
+	filename: string;
+	requiredRole: string | null;
+	expiration: string | null;
+	checksum: string | null;
 	[key: string]: unknown;
 }
 
@@ -52,106 +47,31 @@ interface FileMetadata {
 // Helper Functions
 // ============================================================================
 
-/**
- * Fetches file metadata from KV cache.
- *
- * @param env - Environment with KV binding
- * @param fileId - File identifier
- * @returns Parsed metadata or null if not found
- */
-async function getKvMetadata(env: Env, fileId: string): Promise<FileMetadata | null> {
-	if (!env.FILE_METADATA) {
+async function getFileMetadataFromD1(env: Env, fileId: string): Promise<FileMetadata | null> {
+	const { results } = await env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(fileId).all<FileMetadata>();
+	if (!results || results.length === 0) {
 		return null;
 	}
-
-	try {
-		const raw = await env.FILE_METADATA.get(`file:${fileId}`);
-		if (!raw) {
-			return null;
-		}
-		return JSON.parse(raw) as FileMetadata;
-	} catch {
-		return null;
-	}
+	return results[0];
 }
 
-/**
- * Resolves the R2 object key for a file.
- *
- * @param env - Environment with R2 binding
- * @param fileId - File identifier
- * @param kvMetadata - Optional cached metadata
- * @returns R2 object key
- * @throws {HTTPException} 404 if file not found
- */
-async function resolveR2Key(
-	env: Env,
-	fileId: string,
-	kvMetadata: FileMetadata | null
-): Promise<string> {
-	// Try KV cache first
-	if (kvMetadata?.r2Key) {
-		return kvMetadata.r2Key;
-	}
-
-	// Fall back to R2 list
-	const list = await env.R2_FILES.list({ prefix: `${fileId}/`, limit: 1 });
-	if (!list.objects.length) {
-		throw new HTTPException(404, { message: 'File not found.' });
-	}
-
-	return list.objects[0].key;
-}
-
-/**
- * Validates user authorization to access a file.
- *
- * @param user - Current user (may be undefined for public access)
- * @param metadata - File metadata with access requirements
- * @throws {HTTPException} 403 if access denied
- */
 function validateAccess(user: User | undefined, metadata: FileMetadata): void {
-	const requiredRole = metadata.requiredRole ?? metadata.requiredrole;
-
-	if (!requiredRole) {
-		return; // No role required, public access allowed
+	if (!metadata.requiredRole) {
+		return; // Public access
 	}
-
-	const userRoles = user?.roles ?? [];
-	const hasAccess = isAdmin(user) || userRoles.includes(requiredRole);
-
-	if (!hasAccess) {
-		throw new HTTPException(403, {
-			message: 'Access denied. Required role not met.',
-		});
-	}
-}
-
-/**
- * Checks if a file has expired.
- *
- * @param metadata - File metadata with expiration
- * @throws {HTTPException} 410 if file has expired
- */
-function validateExpiration(metadata: FileMetadata): void {
-	if (!metadata.expiration) {
+	if (isAdmin(user) || user?.roles.includes(metadata.requiredRole)) {
 		return;
 	}
+	throw new HTTPException(403, { message: 'Access denied. Required role not met.' });
+}
 
-	const expirationDate = new Date(metadata.expiration);
-	if (expirationDate <= new Date()) {
+function validateExpiration(metadata: FileMetadata): void {
+	if (metadata.expiration && new Date(metadata.expiration) <= new Date()) {
 		throw new HTTPException(410, { message: 'This file has expired.' });
 	}
 }
 
-/**
- * Sanitizes a filename for use in HTTP headers.
- *
- * @param filename - Original filename
- * @returns Sanitized filename safe for Content-Disposition header
- */
 function sanitizeFilename(filename: string): string {
-	// Remove or replace unsafe characters
 	return filename.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
@@ -159,164 +79,162 @@ function sanitizeFilename(filename: string): string {
 // Download Handler
 // ============================================================================
 
-/**
- * Handles file download requests.
- *
- * @remarks
- * Download behavior varies by environment:
- * - **Production**: Generates a presigned URL and redirects. This offloads
- *   bandwidth from the Worker and avoids egress fees.
- * - **Development**: Streams the file through the Worker. This is compatible
- *   with Wrangler's local development environment.
- *
- * @param c - Hono context with environment bindings and optional user
- * @returns Redirect response (production) or streamed file (development)
- *
- * @throws {HTTPException} 403 - Access denied (role requirement not met)
- * @throws {HTTPException} 404 - File not found
- * @throws {HTTPException} 410 - File has expired
- * @throws {HTTPException} 500 - R2 credentials not configured
- */
-export async function handleDownload(
-	c: Context<{ Bindings: Env; Variables: { user?: User } }>
-): Promise<Response> {
+export async function handleDownload(c: Context<{ Bindings: Env; Variables: { user?: User } }>): Promise<Response> {
 	const { env } = c;
 	const { config, logger } = env;
 	const user = c.get('user');
 
-	// Validate and extract file ID
 	const { fileId } = downloadParamsSchema.parse(c.req.param());
+	logger.debug('[DOWNLOAD] Download requested', { fileId, userEmail: user?.email });
 
-	logger.debug('Download requested', { fileId, userEmail: user?.email });
-
-	// Fetch metadata from KV cache
-	const kvMetadata = await getKvMetadata(env, fileId);
-
-	// Resolve R2 object key
-	const r2Key = await resolveR2Key(env, fileId, kvMetadata);
-
-	// Get R2 object metadata
-	const headObj = await env.R2_FILES.head(r2Key);
-	if (!headObj) {
-		logger.warn('File not found in R2', { fileId, r2Key });
-		throw new HTTPException(404, { message: 'File not found in storage.' });
+	const metadata = await getFileMetadataFromD1(env, fileId);
+	if (!metadata) {
+		logger.warn('[DOWNLOAD] File not found', { fileId });
+		throw new HTTPException(404, { message: 'File not found.' });
 	}
 
-	// Merge metadata from R2 and KV
-	const metadata: FileMetadata = {
-		...headObj.customMetadata,
-		...kvMetadata,
-	};
+	logger.debug('[DOWNLOAD] File metadata retrieved', {
+		fileId,
+		filename: metadata.filename,
+		r2Key: metadata.r2Key,
+		requiredRole: metadata.requiredRole,
+	});
 
-	// Validate access and expiration
 	validateAccess(user, metadata);
 	validateExpiration(metadata);
 
-	// Production: Use presigned URL redirect
-	if (config.ENVIRONMENT === 'production') {
-		return handlePresignedDownload(c, r2Key, metadata);
+	// Check if we should use presigned URLs or streaming
+	// FIX: Get R2 credentials from env secrets, not config
+	const { R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ACCOUNT_ID } = env;
+	const hasR2Credentials = Boolean(R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_ACCOUNT_ID);
+
+	logger.debug('[DOWNLOAD] Download method determination', {
+		environment: config.ENVIRONMENT,
+		hasR2Credentials,
+		willUsePresigned: config.ENVIRONMENT === 'production' && hasR2Credentials,
+	});
+
+	if (config.ENVIRONMENT === 'production' && hasR2Credentials) {
+		return handlePresignedDownload(c, metadata);
 	}
 
-	// Development: Stream through Worker
-	return handleStreamedDownload(c, r2Key, metadata);
-}
-
-/**
- * Generates a presigned URL and redirects the client.
- *
- * @param c - Hono context
- * @param r2Key - R2 object key
- * @param metadata - File metadata
- * @returns Redirect response to presigned URL
- */
-async function handlePresignedDownload(
-	c: Context<{ Bindings: Env; Variables: { user?: User } }>,
-	r2Key: string,
-	metadata: FileMetadata
-): Promise<Response> {
-	const { env } = c;
-	const { config, logger } = env;
-	const { R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = env;
-	const { R2_ACCOUNT_ID, R2_BUCKET_NAME } = config;
-
-	// Validate R2 credentials
-	if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
-		logger.error('R2 credentials not configured for presigned URLs');
-		throw new HTTPException(500, {
-			message: 'Download service temporarily unavailable.',
+	// Fall back to streaming (development or missing credentials)
+	if (config.ENVIRONMENT === 'production' && !hasR2Credentials) {
+		logger.warn('[DOWNLOAD] R2 credentials missing in production, falling back to streaming', {
+			fileId,
 		});
 	}
 
-	logger.info('Generating presigned URL', {
-		bucket: R2_BUCKET_NAME,
-		key: r2Key,
-	});
-
-	// Create AWS client for signing
-	const aws = new AwsClient({
-		accessKeyId: R2_ACCESS_KEY_ID,
-		secretAccessKey: R2_SECRET_ACCESS_KEY,
-		service: 's3',
-		region: 'auto',
-	});
-
-	// Build presigned URL
-	const url = new URL(
-		`https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${R2_BUCKET_NAME}/${r2Key}`
-	);
-	url.searchParams.set('X-Amz-Expires', String(PRESIGNED_URL_EXPIRY_SECONDS));
-
-	const signedRequest = await aws.sign(url.href, {
-		aws: { signQuery: true },
-	});
-
-	return c.redirect(signedRequest.url, 302);
+	return handleStreamedDownload(c, metadata);
 }
 
-/**
- * Streams the file directly through the Worker.
- *
- * @param c - Hono context
- * @param r2Key - R2 object key
- * @param metadata - File metadata
- * @returns Streamed file response
- */
-async function handleStreamedDownload(
-	c: Context<{ Bindings: Env; Variables: { user?: User } }>,
-	r2Key: string,
-	metadata: FileMetadata
-): Promise<Response> {
+async function handlePresignedDownload(c: Context<{ Bindings: Env }>, metadata: FileMetadata): Promise<Response> {
+	const { env } = c;
+	const { config, logger } = env;
+
+	// FIX: Get credentials from env, not config
+	const { R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ACCOUNT_ID } = env;
+
+	if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
+		logger.error('[DOWNLOAD] R2 credentials not configured for presigned URLs', {
+			hasAccountId: !!R2_ACCOUNT_ID,
+			hasAccessKey: !!R2_ACCESS_KEY_ID,
+			hasSecretKey: !!R2_SECRET_ACCESS_KEY,
+		});
+		throw new HTTPException(500, { message: 'Download service temporarily unavailable.' });
+	}
+
+	logger.info('[DOWNLOAD] Generating presigned URL', {
+		key: metadata.r2Key,
+		accountId: R2_ACCOUNT_ID.substring(0, 8) + '***', // Log partial ID for debugging
+	});
+
+	try {
+		const aws = new AwsClient({
+			accessKeyId: R2_ACCESS_KEY_ID,
+			secretAccessKey: R2_SECRET_ACCESS_KEY,
+			service: 's3',
+			region: 'auto',
+		});
+
+		const url = new URL(`https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${config.R2_BUCKET_NAME}/${metadata.r2Key}`);
+		url.searchParams.set('X-Amz-Expires', String(PRESIGNED_URL_EXPIRY_SECONDS));
+
+		// Add response headers to force download with correct filename
+		url.searchParams.set('response-content-disposition', `attachment; filename="${encodeURIComponent(metadata.filename)}"`);
+
+		const signedRequest = await aws.sign(url.href, { aws: { signQuery: true } });
+
+		logger.info('[DOWNLOAD] Presigned URL generated successfully', {
+			fileId: metadata.id,
+			expiresIn: PRESIGNED_URL_EXPIRY_SECONDS,
+		});
+
+		return c.redirect(signedRequest.url, 302);
+	} catch (error) {
+		logger.error(
+			'[DOWNLOAD] Failed to generate presigned URL',
+			{
+				fileId: metadata.id,
+				error: error instanceof Error ? error.message : 'Unknown error',
+				stack: error instanceof Error ? error.stack : undefined,
+			},
+			error instanceof Error ? error : undefined
+		);
+
+		// Fall back to streaming on presigned URL failure
+		logger.warn('[DOWNLOAD] Falling back to streaming due to presigned URL error');
+		return handleStreamedDownload(c, metadata);
+	}
+}
+
+async function handleStreamedDownload(c: Context<{ Bindings: Env }>, metadata: FileMetadata): Promise<Response> {
 	const { env } = c;
 	const { logger } = env;
 
-	// Fetch the actual object
-	const object = await env.R2_FILES.get(r2Key);
-	if (!object) {
-		logger.error('Failed to retrieve file data', { r2Key });
-		throw new HTTPException(404, { message: 'File data could not be retrieved.' });
+	logger.debug('[DOWNLOAD] Using streaming download', { r2Key: metadata.r2Key });
+
+	try {
+		const object = await env.R2_FILES.get(metadata.r2Key);
+		if (!object) {
+			logger.error('[DOWNLOAD] Failed to retrieve file from R2', {
+				r2Key: metadata.r2Key,
+				fileId: metadata.id,
+			});
+			throw new HTTPException(404, { message: 'File data could not be retrieved.' });
+		}
+
+		const filename = sanitizeFilename(metadata.filename);
+		logger.info('[DOWNLOAD] Streaming file', {
+			r2Key: metadata.r2Key,
+			filename,
+			size: object.size,
+			fileId: metadata.id,
+		});
+
+		const headers = new Headers({
+			'Content-Type': object.httpMetadata?.contentType ?? 'application/octet-stream',
+			'Content-Length': String(object.size),
+			'Content-Disposition': `attachment; filename="${filename}"`,
+			'Cache-Control': 'private, no-cache',
+		});
+
+		if (object.httpEtag) headers.set('ETag', object.httpEtag);
+		if (metadata.checksum) headers.set('X-File-Checksum', metadata.checksum);
+
+		return new Response(object.body, { headers });
+	} catch (error) {
+		logger.error(
+			'[DOWNLOAD] Streaming download failed',
+			{
+				fileId: metadata.id,
+				r2Key: metadata.r2Key,
+				error: error instanceof Error ? error.message : 'Unknown error',
+				stack: error instanceof Error ? error.stack : undefined,
+			},
+			error instanceof Error ? error : undefined
+		);
+
+		throw error;
 	}
-
-	// Determine filename
-	const originalName = metadata.originalName ?? r2Key.split('/').pop() ?? 'file';
-	const filename = sanitizeFilename(originalName);
-
-	logger.debug('Streaming file', { r2Key, filename, size: object.size });
-
-	// Build response headers
-	const headers = new Headers({
-		'Content-Type': object.httpMetadata?.contentType ?? 'application/octet-stream',
-		'Content-Length': String(object.size),
-		'Content-Disposition': `attachment; filename="${filename}"`,
-		'Cache-Control': 'private, no-cache',
-	});
-
-	// Add optional headers
-	if (object.httpEtag) {
-		headers.set('ETag', object.httpEtag);
-	}
-	if (metadata.checksum) {
-		headers.set('X-File-Checksum', metadata.checksum);
-	}
-
-	return new Response(object.body, { headers });
 }

@@ -158,12 +158,12 @@ function parseRoles(roles: string | string[]): UserRole[] {
  * @returns Array of user roles, defaults to ['user'] on failure
  */
 async function getUserRolesFromD1(env: Env, email: string): Promise<UserRole[]> {
-	if (!env.ROLES_DB || !email) {
+	if (!env.DB || !email) {
 		return [...DEFAULT_USER_ROLES];
 	}
 
 	try {
-		const stmt = env.ROLES_DB.prepare(
+		const stmt = env.DB.prepare(
 			'SELECT roles FROM user_roles WHERE email = ?1 LIMIT 1'
 		);
 		const row = await stmt.bind(email).first<{ roles: string | string[] }>();
@@ -211,7 +211,7 @@ interface AuthenticateOptions {
  */
 export const authenticate = (options: AuthenticateOptions) => {
 	return createMiddleware<{ Bindings: Env; Variables: { user: User } }>(async (c, next) => {
-		const { config, ROLES_DB, logger } = c.env;
+		const { config, DB, logger } = c.env;
 		const isDev = config.ENVIRONMENT === 'development';
 
 		// Development bypass: Use mock user if DEV_USER_EMAIL is configured
@@ -276,7 +276,7 @@ export const authenticate = (options: AuthenticateOptions) => {
 		const roles: UserRole[] =
 			Array.isArray(payload.roles) && payload.roles.length > 0
 				? payload.roles.map(String)
-				: await getUserRolesFromD1({ ROLES_DB } as Env, email);
+				: await getUserRolesFromD1({ DB } as Env, email);
 
 		const user: User = { email, sub, roles, raw: payload };
 		logger.debug('User authenticated', { email, roles });

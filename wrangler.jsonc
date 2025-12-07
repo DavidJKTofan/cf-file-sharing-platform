@@ -7,7 +7,9 @@
 	"name": "cf-file-sharing-platform",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-11-12",
-	"compatibility_flags": ["global_fetch_strictly_public"],
+	"compatibility_flags": [
+		"global_fetch_strictly_public"
+	],
 	"assets": {
 		// The path to the directory containing the `index.html` file to be served at `/`
 		"directory": "./public"
@@ -23,12 +25,6 @@
 	],
 	"workers_dev": false,
 	// TOP-LEVEL BINDINGS (used for default production deployments)
-	"kv_namespaces": [
-		{
-			"binding": "FILE_METADATA",
-			"id": "ee66296fba274991a379d269f67a50e6"
-		}
-	],
 	"r2_buckets": [
 		{
 			"bucket_name": "file-sharing-platform-files",
@@ -36,10 +32,18 @@
 		}
 	],
 	"d1_databases": [
+		// {
+		// 	"binding": "DB",
+		// 	"database_name": "file-sharing-platform-db",
+		// 	"database_id": "a1c8373e-8ede-4286-ad6d-e72d2cbccc8c",
+		// 	"migrations_dir": "migrations"
+		// },
 		{
-			"binding": "ROLES_DB",
-			"database_name": "file-sharing-platform-user-roles",
-			"database_id": "a1c8373e-8ede-4286-ad6d-e72d2cbccc8c"
+			"binding": "DB",
+			"database_name": "file-sharing-platform-db",
+			"database_id": "5d5c1f4b-d328-4ea8-a07b-e72b54932383",
+			"migrations_dir": "migrations",
+			"remote": true
 		}
 	],
 	// Durable Objects for TUS resumable uploads
@@ -55,7 +59,9 @@
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_sqlite_classes": ["TusUploadHandler"]
+			"new_sqlite_classes": [
+				"TusUploadHandler"
+			]
 		}
 	],
 	"vars": {
@@ -70,23 +76,20 @@
 	// NAMED ENVIRONMENTS
 	"env": {
 		"development": {
-			"kv_namespaces": [
-				{
-					"binding": "FILE_METADATA",
-					"id": "ee66296fba274991a379d269f67a50e6"
-				}
-			],
 			"r2_buckets": [
 				{
 					"bucket_name": "file-sharing-platform-files",
-					"binding": "R2_FILES"
+					"binding": "R2_FILES",
+					"remote": true
 				}
 			],
 			"d1_databases": [
 				{
-					"binding": "ROLES_DB",
-					"database_name": "file-sharing-platform-user-roles",
-					"database_id": "a1c8373e-8ede-4286-ad6d-e72d2cbccc8c"
+					"binding": "DB",
+					"database_name": "file-sharing-platform-db",
+					"database_id": "a1c8373e-8ede-4286-ad6d-e72d2cbccc8c",
+					"migrations_dir": "migrations",
+					"remote": true
 				}
 			],
 			// Durable Objects binding for development

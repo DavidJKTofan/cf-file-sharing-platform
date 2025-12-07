@@ -6,9 +6,8 @@ The project is a serverless application with the following components:
 
 - **Backend**: Cloudflare Workers written in TypeScript, using the Hono web framework.
 - **File Storage**: Cloudflare R2 for object storage.
-- **Metadata Storage**: Cloudflare KV for storing file metadata.
+- **Metadata Storage**: Cloudflare D1 for storing file metadata and user roles.
 - **Upload State**: Cloudflare Durable Objects with SQLite for TUS resumable upload state management.
-- **User Roles**: Cloudflare D1 for managing user roles and permissions.
 - **Authentication**: Cloudflare Access for securing admin endpoints.
 - **Frontend**: Vanilla JavaScript, HTML, and Tailwind CSS.
 
@@ -21,9 +20,8 @@ Built with a modern serverless stack:
 - **Frontend**: Vanilla JavaScript, HTML5, Tailwind CSS
 - **Backend**: Cloudflare Workers (TypeScript) with Hono framework
 - **File Storage**: Cloudflare R2 Object Storage
-- **Metadata Cache**: Cloudflare Workers KV
+- **Metadata and Roles**: Cloudflare D1 (SQLite)
 - **Upload State**: Cloudflare Durable Objects (SQLite-backed) for TUS resumable uploads
-- **User Roles**: Cloudflare D1 (SQLite)
 - **Security**: Cloudflare Access for authentication
 
 ```mermaid
@@ -41,8 +39,7 @@ graph TB
 
     subgraph "Storage Layer"
         F[Cloudflare R2<br/>Object Storage]
-        G[Cloudflare KV<br/>Metadata Cache]
-        H[D1<br/>User Roles]
+        H[D1<br/>File Metadata & Roles]
     end
 
     subgraph "Durable Objects"
@@ -68,7 +65,6 @@ graph TB
     D --> K
     D --> L
     D --> F
-    D --> G
     D --> H
     L --> M
     M --> F
@@ -82,7 +78,7 @@ graph TB
 
     class A,B,C client
     class D,E edge
-    class F,G,H storage
+    class F,H storage
     class I,J api
     class K,L upload
     class M durable
@@ -128,7 +124,7 @@ To start the local development server, run:
 npm run dev
 ```
 
-This will start a local server that emulates the Cloudflare Workers environment. You will also need to create a `.dev.vars` file in the project root to configure your local Cloudflare resources (R2, KV, D1).
+This will start a local server that emulates the Cloudflare Workers environment. You will also need to create a `.dev.vars` file in the project root to configure your local Cloudflare resources (R2, D1).
 
 ### Building and Deploying
 
@@ -164,9 +160,8 @@ npm run build:css
 | Name                                                        | Required | Purpose                                                                                                                                                                                               |
 | ----------------------------------------------------------- | -------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `R2_FILES` (binding)                                        |       ✅ | R2 bucket binding (object storage)                                                                                                                                                                    |
-| `FILE_METADATA` (KV binding)                                |       ✅ | KV for `file:<fileId>` metadata cache                                                                                                                                                                 |
+| `DB` (D1 binding)                                           |       ✅ | D1 database for file metadata and user roles                                                                                                                                                          |
 | `TUS_UPLOAD_HANDLER` (DO binding)                           |       ✅ | Durable Object namespace for TUS resumable upload state (SQLite-backed)                                                                                                                               |
-| `ROLES_DB` (D1 binding)                                     |       ✅ | Required D1 DB for role lookup                                                                                                                                                                        |
 | `MAX_TOTAL_FILE_SIZE`                                       |       ⚪ | Maximum allowed file size (bytes)                                                                                                                                                                     |
 | `MAX_DIRECT_UPLOAD`                                         |       ⚪ | Threshold for supporting legacy direct uploads                                                                                                                                                        |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID` |       ✅ | Required for generating [presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/) for downloads, using [aws4fetch](https://developers.cloudflare.com/r2/examples/aws/aws4fetch/). |
@@ -194,21 +189,26 @@ npx wrangler dev --env development
 
 This codebase stores metadata across multiple storage layers for optimal performance and reliability.
 
-### R2 Object `customMetadata`
+### D1 `files` table
 
-Written at upload creation; available immediately on the object:
+The D1 database is the **source of truth** for all file metadata. The `files` table contains a comprehensive record of every file, including its properties, status, and location.
 
-- `fileId` — UUID assigned at upload creation
-- `originalName` — original filename
+- `id` — UUID assigned at upload creation
+- `name` — original filename
+- `size` — file size in bytes
+- `type` — MIME type
 - `description` — free text
 - `tags` — comma separated
-- `expiration` — ISO datetime (UTC)
+- `status` — upload status (`pending`, `completed`, `error`)
+- `r2_key` — the key of the file in the R2 bucket
+- `hide_from_list` — `1` for true, `0` for false
+- `uploaded_at` — ISO datetime (UTC)
+- `expires_at` — ISO datetime (UTC)
 - `checksum` — SHA-256 hex (64 hex chars)
-- `uploadedAt` — ISO datetime (UTC)
-- `hideFromList` — `"true"` / `"false"`
-- `uploadType` — `"multipart"` or `"tus"`
-- `asn`, `country`, `city`, `timezone` — Cloudflare edge geo fields (if available)
-- `userAgent` — client user-agent string (optional)
+- `upload_type` — `"multipart"` or `"tus"`
+- `ip_address` — client IP address
+- `user_agent` — client user-agent string
+- `geo_asn`, `geo_colo`, `geo_country`, `geo_city`, `geo_timezone` — Cloudflare edge geo fields
 
 ### Durable Objects (SQLite)
 
@@ -225,13 +225,16 @@ TUS upload state is managed by the `TusUploadHandler` Durable Object with SQLite
 
 - **Automatic cleanup** — Durable Object alarms delete expired uploads after 7 days
 
-### Workers KV
+### R2 Object `customMetadata` (Redundancy)
 
-- `file:<fileId>` — final metadata record written at completion (for fast lookups)
+While D1 is the primary source of truth, essential metadata is also written to the `customMetadata` of each R2 object upon upload. This serves as a redundant backup and allows for direct inspection of object properties in the Cloudflare dashboard.
 
 ### List behavior
 
-Listing endpoints read R2 `customMetadata` first (fresh), then `file:<fileId>` in KV as fallback. This ensures up-to-date visibility and robust behavior if R2 was temporarily unavailable.
+All file listing and search operations are performed by querying the `files` table in the D1 database. This provides a consistent and efficient way to filter, sort, and paginate through files.
+
+- The `/api/list` endpoint queries for publicly visible files (`hide_from_list = 0`).
+- The `/api/admin/list` endpoint queries all files and supports advanced filtering.
 
 ## Security Checklist
 

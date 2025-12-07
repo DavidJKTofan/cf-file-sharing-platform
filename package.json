@@ -2,13 +2,10 @@
 	"name": "file-sharing-platform",
 	"version": "0.0.2",
 	"scripts": {
-		"dev": "wrangler dev --env development",
-		"deploy": "npm run build:css && wrangler deploy",
-		"deploy:production": "npm run build:css && wrangler deploy",
-		"deploy:dev": "npm run build:css && wrangler deploy --env development",
+		"dev": "npm run build:css && wrangler types && wrangler dev --env development",
+		"deploy": "npm run build:css && wrangler types && wrangler deploy",
 		"build:css": "npx @tailwindcss/cli -i ./input.css -o ./public/tailwind.css --minify",
 		"watch:css": "npx @tailwindcss/cli -i ./input.css -o ./public/tailwind.css --watch",
-		"format": "prettier --write .",
 		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {
@@ -17,7 +14,7 @@
 		"postcss": "^8.5.6",
 		"tailwindcss": "^4.1.17",
 		"typescript": "^5.5.2",
-		"wrangler": "^4.51.0"
+		"wrangler": "^4.53.0"
 	},
 	"dependencies": {
 		"@tailwindcss/cli": "^4.1.17",

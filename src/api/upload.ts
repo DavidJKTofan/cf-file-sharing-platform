@@ -1,62 +1,57 @@
 /**
  * @fileoverview File upload handler for direct multipart uploads.
- *
- * Handles single-file uploads via multipart/form-data. For large files,
- * use the TUS resumable upload protocol instead.
- *
- * @module api/upload
  */
 
 import { HTTPException } from 'hono/http-exception';
 import type { Context } from 'hono';
 import { z } from 'zod';
-import type { Env, User, CfProperties, FileCustomMetadata } from '../types';
+import type { Env, User, CfProperties } from '../types';
+
+// ============================================================================
+// Types
+// ============================================================================
+
+interface FileCustomMetadata {
+	fileId: string;
+	description: string;
+	tags: string;
+	expiration: string;
+	checksum: string;
+	originalName: string;
+	uploadedAt: string;
+	hideFromList: string;
+	requiredRole: string;
+	uploadType: string;
+	asn: string;
+	country: string;
+	city: string;
+	timezone: string;
+	userAgent: string;
+}
 
 // ============================================================================
 // Validation Schemas
 // ============================================================================
 
-/**
- * Schema for validating upload form data.
- *
- * @remarks
- * All fields except `file` are optional metadata that can be attached
- * to the uploaded file.
- */
 const uploadFormSchema = z.object({
-	/** The file to upload (required) */
 	file: z.instanceof(File, { message: 'A file is required' }),
-	/** Optional description of the file */
 	description: z.string().max(1000).optional(),
-	/** Optional comma-separated tags */
 	tags: z.string().max(500).optional(),
-	/** Optional expiration date (ISO 8601 format) */
 	expiration: z.string().optional(),
-	/** Optional checksum for integrity verification */
 	checksum: z.string().max(128).optional(),
-	/** Whether to hide from public file listings */
 	hideFromList: z
 		.string()
 		.transform((s) => s.toLowerCase() === 'true')
 		.optional(),
-	/** Role required to access this file */
 	requiredRole: z.string().max(50).optional(),
 });
 
-/** Inferred type from upload form schema */
 type UploadFormData = z.infer<typeof uploadFormSchema>;
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-/**
- * Validates and parses an expiration date string.
- *
- * @param expiration - ISO 8601 date string
- * @returns Parsed Date object or null if no expiration
- * @throws {HTTPException} If date is invalid or in the past
- */
 function parseExpirationDate(expiration: string | undefined): Date | null {
 	if (!expiration) {
 		return null;
@@ -78,23 +73,11 @@ function parseExpirationDate(expiration: string | undefined): Date | null {
 	return date;
 }
 
-/**
- * Extracts Cloudflare request properties for metadata.
- *
- * @param req - Raw request object
- * @returns Cloudflare properties or empty defaults
- */
 function extractCfProperties(req: Request): CfProperties {
 	const cf = (req as unknown as { cf?: CfProperties }).cf;
 	return cf ?? {};
 }
 
-/**
- * Formats file size for human-readable display.
- *
- * @param bytes - Size in bytes
- * @returns Formatted string (e.g., "10.5 MB")
- */
 function formatFileSize(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -102,41 +85,55 @@ function formatFileSize(bytes: number): string {
 	return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+/**
+ * Safely serializes R2 checksums object to string.
+ * FIX: Properly handle R2Checksums object
+ */
+function serializeChecksums(checksums: R2Checksums | undefined): string {
+	if (!checksums) {
+		return '{}';
+	}
+
+	try {
+		const checksumObj = checksums.toJSON();
+		return JSON.stringify(checksumObj);
+	} catch (error) {
+		console.error('[UPLOAD] Failed to serialize checksums', { error });
+		return '{}';
+	}
+}
+
 // ============================================================================
 // Upload Handler
 // ============================================================================
 
-/**
- * Handles direct file uploads via multipart/form-data.
- *
- * @remarks
- * This handler is for smaller files that can be uploaded in a single request.
- * For large files (>100MB), use the TUS resumable upload protocol.
- *
- * @param c - Hono context with environment bindings and user
- * @returns JSON response with file metadata and download URL
- *
- * @throws {HTTPException} 400 - Invalid content type or form data
- * @throws {HTTPException} 413 - File exceeds maximum size
- */
-export async function handleUpload(
-	c: Context<{ Bindings: Env; Variables: { user: User } }>
-): Promise<Response> {
+export async function handleUpload(c: Context<{ Bindings: Env; Variables: { user: User } }>): Promise<Response> {
 	const { req, env } = c;
 	const { config, logger } = env;
 	const user = c.get('user');
 
+	logger.info('[UPLOAD] Direct upload requested', {
+		uploader: user.email,
+		sub: user.sub,
+		roles: user.roles,
+	});
+
 	// Validate content type
 	const contentType = req.header('content-type') ?? '';
 	if (!contentType.includes('multipart/form-data')) {
-		logger.warn('Invalid content type for upload', { contentType });
+		logger.error('[UPLOAD] Invalid content type', {
+			contentType,
+			expected: 'multipart/form-data',
+		});
 		throw new HTTPException(400, {
 			message: 'Invalid content type. Expected multipart/form-data.',
 		});
 	}
 
 	// Parse and validate form data
+	logger.debug('[UPLOAD] Parsing form data');
 	const formData = await req.formData();
+
 	const validated = uploadFormSchema.safeParse({
 		file: formData.get('file'),
 		description: formData.get('description'),
@@ -148,22 +145,35 @@ export async function handleUpload(
 	});
 
 	if (!validated.success) {
-		logger.debug('Upload validation failed', { errors: validated.error.flatten() });
+		logger.error('[UPLOAD] Validation failed', {
+			errors: validated.error.flatten(),
+			formDataKeys: Array.from(formData.keys()),
+		});
 		throw new HTTPException(400, {
 			message: 'Invalid form data',
 			cause: validated.error,
 		});
 	}
 
-	const { file, description, tags, expiration, checksum, hideFromList, requiredRole } =
-		validated.data;
+	const { file, description, tags, expiration, checksum, hideFromList, requiredRole } = validated.data;
+
+	logger.debug('[UPLOAD] Form data validated', {
+		filename: file.name,
+		size: file.size,
+		type: file.type,
+		description: description?.substring(0, 50),
+		tags,
+		hideFromList,
+		requiredRole,
+	});
 
 	// Validate file size
 	if (file.size > config.MAX_TOTAL_FILE_SIZE) {
 		const maxSize = formatFileSize(config.MAX_TOTAL_FILE_SIZE);
-		logger.warn('File size exceeds limit', {
+		logger.warn('[UPLOAD] File too large', {
 			fileSize: file.size,
 			maxSize: config.MAX_TOTAL_FILE_SIZE,
+			filename: file.name,
 		});
 		throw new HTTPException(413, {
 			message: `File exceeds maximum allowed size of ${maxSize}.`,
@@ -176,6 +186,15 @@ export async function handleUpload(
 	// Generate unique file ID and R2 object key
 	const fileId = crypto.randomUUID();
 	const objectKey = `${fileId}/${file.name}`;
+
+	logger.info('[UPLOAD] Starting upload', {
+		fileId,
+		filename: file.name,
+		size: file.size,
+		contentType: file.type,
+		objectKey,
+		uploader: user.email,
+	});
 
 	// Extract Cloudflare request properties for metadata
 	const cf = extractCfProperties(req.raw);
@@ -191,7 +210,7 @@ export async function handleUpload(
 		uploadedAt: new Date().toISOString(),
 		hideFromList: String(hideFromList ?? false),
 		requiredRole: requiredRole ?? '',
-		uploadType: 'multipart',
+		uploadType: 'direct',
 		asn: String(cf.asn ?? ''),
 		country: cf.country ?? '',
 		city: cf.city ?? '',
@@ -199,19 +218,138 @@ export async function handleUpload(
 		userAgent: req.header('User-Agent') ?? '',
 	};
 
-	logger.info('Uploading file', {
+	logger.debug('[UPLOAD] Custom metadata prepared', {
 		fileId,
-		filename: file.name,
-		size: file.size,
-		contentType: file.type,
-		uploader: user.email,
+		metadata: customMetadata,
 	});
 
 	// Upload to R2
-	await env.R2_FILES.put(objectKey, file.stream(), {
-		httpMetadata: { contentType: file.type || 'application/octet-stream' },
-		customMetadata: customMetadata as unknown as Record<string, string>,
+	let r2Object: R2Object;
+	try {
+		logger.debug('[UPLOAD] Uploading to R2', { objectKey });
+
+		r2Object = await env.R2_FILES.put(objectKey, file.stream(), {
+			httpMetadata: { contentType: file.type || 'application/octet-stream' },
+			customMetadata: customMetadata as unknown as Record<string, string>,
+		});
+
+		logger.info('[UPLOAD] R2 upload successful', {
+			fileId,
+			key: r2Object.key,
+			size: r2Object.size,
+			etag: r2Object.etag,
+			checksums: r2Object.checksums ? r2Object.checksums.toJSON() : null,
+		});
+	} catch (error) {
+		logger.error(
+			'[UPLOAD] R2 upload failed',
+			{
+				fileId,
+				objectKey,
+				error: error instanceof Error ? error.message : 'Unknown error',
+				stack: error instanceof Error ? error.stack : undefined,
+			},
+			error instanceof Error ? error : undefined
+		);
+
+		throw new HTTPException(500, {
+			message: 'Failed to upload file to storage',
+			cause: error,
+		});
+	}
+
+	// FIX: Properly serialize checksums
+	const checksumString = serializeChecksums(r2Object.checksums);
+
+	logger.debug('[UPLOAD] Serialized checksums', {
+		fileId,
+		checksum: checksumString,
 	});
+
+	// Write metadata to D1
+	logger.debug('[UPLOAD] Writing metadata to D1', { fileId });
+
+	try {
+		const result = await env.DB.prepare(
+			`INSERT INTO files (id, filename, description, tags, size, contentType, uploadedAt, expiration, checksum, uploadType, hideFromList, requiredRole, ownerId, r2Key)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		)
+			.bind(
+				fileId,
+				file.name,
+				description || null,
+				tags || null,
+				file.size,
+				file.type || 'application/octet-stream',
+				customMetadata.uploadedAt,
+				expirationDate?.toISOString() || null,
+				checksumString, // FIX: Use properly serialized checksum
+				'direct',
+				hideFromList ? 1 : 0,
+				requiredRole || null,
+				user.sub,
+				objectKey
+			)
+			.run();
+
+		logger.info('[UPLOAD] D1 metadata written', {
+			fileId,
+			success: result.success,
+			meta: result.meta,
+		});
+
+		// Verify D1 write
+		const verification = await env.DB.prepare('SELECT id, filename, size, checksum FROM files WHERE id = ?').bind(fileId).first();
+
+		if (verification) {
+			logger.info('[UPLOAD] D1 write verified', {
+				fileId,
+				verification,
+			});
+		} else {
+			logger.error('[UPLOAD] D1 verification failed - record not found!', {
+				fileId,
+				criticalError: true,
+			});
+
+			// Roll back R2 upload
+			await env.R2_FILES.delete(objectKey);
+			logger.warn('[UPLOAD] Rolled back R2 object due to D1 verification failure', {
+				fileId,
+			});
+
+			throw new HTTPException(500, {
+				message: 'Failed to verify file metadata. Upload rolled back.',
+			});
+		}
+	} catch (error) {
+		logger.error(
+			'[UPLOAD] D1 write failed',
+			{
+				fileId,
+				error: error instanceof Error ? error.message : 'Unknown error',
+				stack: error instanceof Error ? error.stack : undefined,
+			},
+			error instanceof Error ? error : undefined
+		);
+
+		// If D1 write fails, delete the R2 object to avoid orphaned files
+		try {
+			await env.R2_FILES.delete(objectKey);
+			logger.warn('[UPLOAD] Rolled back R2 object due to D1 failure', { fileId });
+		} catch (deleteError) {
+			logger.error('[UPLOAD] Failed to rollback R2 object', {
+				fileId,
+				objectKey,
+				error: deleteError instanceof Error ? deleteError.message : 'Unknown error',
+			});
+		}
+
+		throw new HTTPException(500, {
+			message: 'Failed to save file metadata. Please try again.',
+			cause: error,
+		});
+	}
 
 	const downloadUrl = `${config.APP_URL}/api/download/${fileId}`;
 
@@ -226,15 +364,12 @@ export async function handleUpload(
 		expiration: customMetadata.expiration || null,
 	};
 
-	// Cache metadata in KV for faster lookups
-	if (env.FILE_METADATA) {
-		await env.FILE_METADATA.put(
-			`file:${fileId}`,
-			JSON.stringify({ ...customMetadata, r2Key: objectKey })
-		);
-	}
-
-	logger.info('File uploaded successfully', { fileId, downloadUrl });
+	logger.info('[UPLOAD] Upload completed successfully', {
+		fileId,
+		filename: file.name,
+		size: file.size,
+		downloadUrl,
+	});
 
 	return c.json(responsePayload, 201);
 }
