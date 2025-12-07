@@ -42,6 +42,8 @@ interface FileStats {
 	expiredFiles: number;
 	hiddenFiles: number;
 	publicFiles: number;
+	averageSize: number;
+	largestFileSize: number;
 }
 
 interface FilteredFilesResult {
@@ -137,12 +139,28 @@ async function calculateStats(db: D1Database, logger: any): Promise<FileStats> {
 				publicFiles: number;
 			}>();
 
+		// Calculate average and largest separately (SQLite AVG/MAX on empty set returns NULL)
+		const sizeStats = await db
+			.prepare(
+				`SELECT
+					COALESCE(AVG(size), 0) as averageSize,
+					COALESCE(MAX(size), 0) as largestFileSize
+				FROM files
+				WHERE size > 0`
+			)
+			.first<{
+				averageSize: number;
+				largestFileSize: number;
+			}>();
+
 		const stats = {
 			totalFiles: results?.totalFiles ?? 0,
 			totalSize: results?.totalSize ?? 0,
 			expiredFiles: results?.expiredFiles ?? 0,
 			hiddenFiles: results?.hiddenFiles ?? 0,
 			publicFiles: results?.publicFiles ?? 0,
+			averageSize: Math.round(sizeStats?.averageSize ?? 0),
+			largestFileSize: sizeStats?.largestFileSize ?? 0,
 		};
 
 		logger.debug('[STATS] Statistics calculated', { stats });
@@ -160,6 +178,8 @@ async function calculateStats(db: D1Database, logger: any): Promise<FileStats> {
 			expiredFiles: 0,
 			hiddenFiles: 0,
 			publicFiles: 0,
+			averageSize: 0,
+			largestFileSize: 0,
 		};
 	}
 }

@@ -19,6 +19,7 @@ import { isAdmin } from '../auth';
 // Constants
 // ============================================================================
 
+// 10 minutes PreSigned URL expiry
 const PRESIGNED_URL_EXPIRY_SECONDS = 600;
 
 // ============================================================================
@@ -128,7 +129,10 @@ export async function handleDownload(c: Context<{ Bindings: Env; Variables: { us
 	return handleStreamedDownload(c, metadata);
 }
 
-async function handlePresignedDownload(c: Context<{ Bindings: Env }>, metadata: FileMetadata): Promise<Response> {
+async function handlePresignedDownload(
+	c: Context<{ Bindings: Env; Variables: { user?: User } }>,
+	metadata: FileMetadata
+): Promise<Response> {
 	const { env } = c;
 	const { config, logger } = env;
 
@@ -188,7 +192,10 @@ async function handlePresignedDownload(c: Context<{ Bindings: Env }>, metadata: 
 	}
 }
 
-async function handleStreamedDownload(c: Context<{ Bindings: Env }>, metadata: FileMetadata): Promise<Response> {
+async function handleStreamedDownload(
+	c: Context<{ Bindings: Env; Variables: { user?: User } }>,
+	metadata: FileMetadata
+): Promise<Response> {
 	const { env } = c;
 	const { logger } = env;
 

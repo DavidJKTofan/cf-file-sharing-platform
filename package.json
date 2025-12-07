@@ -2,8 +2,8 @@
 	"name": "file-sharing-platform",
 	"version": "0.0.2",
 	"scripts": {
-		"dev": "npm run build:css && wrangler types && wrangler dev --env development",
-		"deploy": "npm run build:css && wrangler types && wrangler deploy",
+		"dev": "npm run build:css && npm run typecheck && wrangler types && wrangler dev --env development",
+		"deploy": "npm run build:css && npm run typecheck && wrangler types && wrangler deploy",
 		"build:css": "npx @tailwindcss/cli -i ./input.css -o ./public/tailwind.css --minify",
 		"watch:css": "npx @tailwindcss/cli -i ./input.css -o ./public/tailwind.css --watch",
 		"typecheck": "tsc --noEmit"

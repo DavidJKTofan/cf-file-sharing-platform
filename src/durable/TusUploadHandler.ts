@@ -5,7 +5,7 @@
  * with SQLite storage backend for persistent upload state management.
  */
 
-import { DurableObject, D1Database } from 'cloudflare:workers';
+import { DurableObject } from 'cloudflare:workers';
 
 // ============================================================================
 // Constants
@@ -20,7 +20,21 @@ export const TUS_MAX_SIZE = 5 * 1024 * 1024 * 1024;
 /** Minimum chunk size for multipart uploads (5MB - R2 minimum) */
 const MIN_PART_SIZE = 5 * 1024 * 1024;
 
-/** Upload expiration time in milliseconds (7 days) */
+/**
+ * Upload state expiration time in milliseconds (7 days).
+ *
+ * IMPORTANT: This is NOT the file expiration date!
+ * This is how long the TUS upload session state is kept alive in the Durable Object.
+ *
+ * - If an upload is not completed within 7 days, the upload SESSION expires
+ * - The actual FILE expiration is set by the admin during upload (optional)
+ * - FILE expiration is stored in D1 metadata and checked on download
+ *
+ * Example:
+ * - Admin uploads file with "expires in 1 hour"
+ * - TUS upload session has 7 days to complete
+ * - Once completed, file expires in 1 hour as specified
+ */
 const UPLOAD_EXPIRATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Supported TUS extensions */
