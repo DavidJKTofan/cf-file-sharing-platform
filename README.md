@@ -253,7 +253,7 @@ To prevent abuse or dictionary attacks, we recommend deploying a [Rate Limiting]
 - `/api/admin/r2-info` - R2 dashboard access
 - `/api/debug/jwt` – debug Access token
 
-> **To-Do:** Protect `/admin` and `/api/admin` endpoints with [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/). Additionally, edit the logout URL endpoint (`<your-team-name>.cloudflareaccess.com/cdn-cgi/access/logout`) in the `admin.html` file.
+> **To-Do:** Protect `/admin` and `/api/admin` endpoints with [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/). Additionally, review the [logout URL endpoint](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/#log-out-as-a-user) in the `admin.html` file.
 
 **Public Paths:**
 

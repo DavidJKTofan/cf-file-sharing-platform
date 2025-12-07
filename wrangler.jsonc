@@ -80,7 +80,7 @@
 				{
 					"bucket_name": "file-sharing-platform-files",
 					"binding": "R2_FILES",
-					"remote": true
+					// "remote": true
 				}
 			],
 			"d1_databases": [
@@ -89,7 +89,7 @@
 					"database_name": "file-sharing-platform-db",
 					"database_id": "a1c8373e-8ede-4286-ad6d-e72d2cbccc8c",
 					"migrations_dir": "migrations",
-					"remote": true
+					// "remote": true
 				}
 			],
 			// Durable Objects binding for development
