@@ -165,7 +165,7 @@
 							<tr class="border-b border-slate-200">
 								<th
 									data-col="filename"
-									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition min-w-[200px]"
+									class="px-4 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition w-[22%]"
 								>
 									<div class="flex items-center gap-2">
 										Filename
@@ -181,7 +181,7 @@
 								</th>
 								<th
 									data-col="size"
-									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition min-w-[100px]"
+									class="px-3 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition w-[8%]"
 								>
 									<div class="flex items-center gap-2">
 										Size
@@ -197,7 +197,7 @@
 								</th>
 								<th
 									data-col="description"
-									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-indigo-50/50 min-w-[200px]"
+									class="px-3 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-indigo-50/50 w-[18%]"
 								>
 									<div class="flex items-center gap-2">
 										<svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -221,7 +221,7 @@
 								</th>
 								<th
 									data-col="tags"
-									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-purple-50/50 min-w-[150px]"
+									class="px-3 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-purple-50/50 w-[12%]"
 								>
 									<div class="flex items-center gap-2">
 										<svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -245,7 +245,7 @@
 								</th>
 								<th
 									data-col="uploadedAt"
-									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-emerald-50/50 min-w-[150px]"
+									class="px-3 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-emerald-50/50 w-[11%]"
 								>
 									<div class="flex items-center gap-2">
 										<svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -269,7 +269,7 @@
 								</th>
 								<th
 									data-col="expiration"
-									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-amber-50/50 min-w-[150px]"
+									class="px-3 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-amber-50/50 w-[11%]"
 								>
 									<div class="flex items-center gap-2">
 										<svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -291,7 +291,7 @@
 										</svg>
 									</div>
 								</th>
-								<th class="px-6 py-4 text-right font-semibold text-slate-700 min-w-[180px]">Actions</th>
+								<th class="px-3 py-4 text-right font-semibold text-slate-700 w-[18%]">Actions</th>
 							</tr>
 						</thead>
 						<tbody id="fileTable" class="divide-y divide-slate-100"></tbody>
@@ -503,9 +503,6 @@
 				setInterval(updateCountdowns, 60000);
 
 				function getListEndpoint() {
-					// if (isAdmin) {
-					// 	return '/api/admin/list?includeHidden=true&includeExpired=true';
-					// }
 					// Always use public endpoint - hidden files are filtered server-side
 					return '/api/list';
 				}
@@ -615,73 +612,77 @@
 						const uploadTypeBadge = file.uploadType === 'tus' ? '<span class="badge badge-info ml-2 text-[10px] py-0.5">TUS</span>' : '';
 
 						row.innerHTML = `
-							<td class="px-6 py-4">
+							<td class="px-4 py-3">
 								<div class="flex items-start gap-2">
 									<div class="flex-1 min-w-0">
-										<div class="font-semibold text-slate-800 truncate">${escapeHtml(file.filename || 'Unknown')}</div>
-										<div class="text-xs text-slate-500 mt-1 truncate">ID: ${escapeHtml(file.fileId)} ${uploadTypeBadge}</div>
+										<div class="font-semibold text-slate-800 truncate text-sm">${escapeHtml(file.filename || 'Unknown')}</div>
+										<div class="text-xs text-slate-500 mt-0.5 truncate">ID: ${escapeHtml(file.fileId).substring(0, 8)}... ${uploadTypeBadge}</div>
 									</div>
 								</div>
 							</td>
-							<td class="px-6 py-4">
-								<span class="font-mono text-sm text-slate-700">${formatFileSize(file.size)}</span>
+							<td class="px-3 py-3">
+								<span class="font-mono text-xs text-slate-700">${formatFileSize(file.size)}</span>
 							</td>
-							<td class="px-6 py-4 bg-indigo-50/30">
-								<div class="flex items-start gap-2">
-									<svg class="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<td class="px-3 py-3 bg-indigo-50/30">
+								<div class="flex items-start gap-1.5">
+									<svg class="w-3.5 h-3.5 text-indigo-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
 									</svg>
-									<span class="text-slate-700 text-sm font-medium" title="${escapeHtml(file.description || '')}">${escapeHtml(
-							truncateText(file.description || 'No description')
+									<span class="text-slate-700 text-xs leading-tight" title="${escapeHtml(file.description || '')}">${escapeHtml(
+							truncateText(file.description || 'No description', 40)
 						)}</span>
 								</div>
 							</td>
-							<td class="px-6 py-4 bg-purple-50/30">
-								<div class="flex items-center gap-2">
-									<svg class="w-4 h-4 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<td class="px-3 py-3 bg-purple-50/30">
+								<div class="flex items-center gap-1.5">
+									<svg class="w-3.5 h-3.5 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.98 1.98 0 013 12V7a4 4 0 014-4z" />
 									</svg>
-									<div class="flex flex-wrap gap-1.5">
+									<div class="flex flex-wrap gap-1">
 										${
 											file.tags
 												? escapeHtml(file.tags)
 														.split(',')
+														.slice(0, 2)
 														.map(
 															(t) =>
-																`<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 border border-purple-200">${escapeHtml(
+																`<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700 border border-purple-200">${escapeHtml(
 																	t.trim()
 																)}</span>`
 														)
-														.join('')
-												: '<span class="text-slate-400 text-xs font-medium">No tags</span>'
+														.join('') +
+												  (file.tags.split(',').length > 2
+														? '<span class="text-xs text-slate-400">+' + (file.tags.split(',').length - 2) + '</span>'
+														: '')
+												: '<span class="text-slate-400 text-xs">None</span>'
 										}
 									</div>
 								</div>
 							</td>
-							<td class="px-6 py-4 bg-emerald-50/30">
-								<div class="flex items-center gap-2">
-									<svg class="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<td class="px-3 py-3 bg-emerald-50/30">
+								<div class="flex items-center gap-1.5">
+									<svg class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
 									</svg>
-									<span class="text-sm font-semibold text-slate-700">${formatShortDate(file.uploadedAt)}</span>
+									<span class="text-xs font-medium text-slate-700 whitespace-nowrap">${formatShortDate(file.uploadedAt)}</span>
 								</div>
 							</td>
-							<td class="px-6 py-4 bg-amber-50/30" data-expiration-cell>
-								<div class="flex items-center gap-2">
-									<svg class="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<td class="px-3 py-3 bg-amber-50/30" data-expiration-cell>
+								<div class="flex items-center gap-1.5">
+									<svg class="w-3.5 h-3.5 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
 									</svg>
-									<div>${formatExpiration(file.expiration)}</div>
+									<div class="text-xs">${formatExpiration(file.expiration)}</div>
 								</div>
 							</td>
-							<td class="px-6 py-4 text-right">
-								<div class="flex gap-2 justify-end">
+							<td class="px-3 py-3 text-right">
+								<div class="flex gap-1.5 justify-end">
 									${
 										isExpired
-											? '<span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-100 text-red-700 text-xs font-medium rounded-lg border border-red-200">🚫 Expired</span>'
+											? '<span class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-100 text-red-700 text-xs font-medium rounded-lg border border-red-200">🚫 Expired</span>'
 											: `<a href="${file.downloadUrl}?filename=${encodeURIComponent(
 													file.filename
-											  )}" target="_blank" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-xs font-medium rounded-lg hover:from-indigo-600 hover:to-purple-700 transition shadow-sm">
+											  )}" target="_blank" class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-xs font-medium rounded-lg hover:from-indigo-600 hover:to-purple-700 transition shadow-sm whitespace-nowrap" title="Download">
 											<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
 											</svg>
@@ -690,7 +691,7 @@
 									}
 									<button data-action="copy-id" data-file-id="${escapeHtml(
 										file.fileId
-									)}" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-200 transition">
+									)}" class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-200 transition whitespace-nowrap" title="Copy ID">
 										<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
 										</svg>
