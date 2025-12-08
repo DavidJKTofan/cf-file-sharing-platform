@@ -165,7 +165,7 @@
 							<tr class="border-b border-slate-200">
 								<th
 									data-col="filename"
-									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition"
+									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition min-w-[200px]"
 								>
 									<div class="flex items-center gap-2">
 										Filename
@@ -179,7 +179,10 @@
 										</svg>
 									</div>
 								</th>
-								<th data-col="size" class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition">
+								<th
+									data-col="size"
+									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition min-w-[100px]"
+								>
 									<div class="flex items-center gap-2">
 										Size
 										<svg class="w-4 h-4 text-slate-400 sort-indicator" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -194,7 +197,7 @@
 								</th>
 								<th
 									data-col="description"
-									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition hidden lg:table-cell bg-indigo-50/50"
+									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-indigo-50/50 min-w-[200px]"
 								>
 									<div class="flex items-center gap-2">
 										<svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -218,7 +221,7 @@
 								</th>
 								<th
 									data-col="tags"
-									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition hidden lg:table-cell bg-purple-50/50"
+									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-purple-50/50 min-w-[150px]"
 								>
 									<div class="flex items-center gap-2">
 										<svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -242,7 +245,7 @@
 								</th>
 								<th
 									data-col="uploadedAt"
-									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition hidden xl:table-cell bg-emerald-50/50"
+									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-emerald-50/50 min-w-[150px]"
 								>
 									<div class="flex items-center gap-2">
 										<svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -266,7 +269,7 @@
 								</th>
 								<th
 									data-col="expiration"
-									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition hidden xl:table-cell bg-amber-50/50"
+									class="px-6 py-4 text-left font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition bg-amber-50/50 min-w-[150px]"
 								>
 									<div class="flex items-center gap-2">
 										<svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -288,7 +291,7 @@
 										</svg>
 									</div>
 								</th>
-								<th class="px-6 py-4 text-right font-semibold text-slate-700">Actions</th>
+								<th class="px-6 py-4 text-right font-semibold text-slate-700 min-w-[180px]">Actions</th>
 							</tr>
 						</thead>
 						<tbody id="fileTable" class="divide-y divide-slate-100"></tbody>
@@ -500,9 +503,10 @@
 				setInterval(updateCountdowns, 60000);
 
 				function getListEndpoint() {
-					if (isAdmin) {
-						return '/api/admin/list?includeHidden=true&includeExpired=true';
-					}
+					// if (isAdmin) {
+					// 	return '/api/admin/list?includeHidden=true&includeExpired=true';
+					// }
+					// Always use public endpoint - hidden files are filtered server-side
 					return '/api/list';
 				}
 
@@ -572,7 +576,8 @@
 							throw new Error(result.error || 'Failed to load files');
 						}
 
-						allFiles = result.files || [];
+						// Filter out hidden files on the client side as well
+						allFiles = (result.files || []).filter((file) => !file.hideFromList);
 						filteredFiles = [...allFiles];
 						updateFileStats();
 						sortFiles(currentSort.col, currentSort.asc);
@@ -618,8 +623,10 @@
 									</div>
 								</div>
 							</td>
-							<td class="px-6 py-4"><span class="font-mono text-sm text-slate-700">${formatFileSize(file.size)}</span></td>
-							<td class="px-6 py-4 hidden lg:table-cell bg-indigo-50/30">
+							<td class="px-6 py-4">
+								<span class="font-mono text-sm text-slate-700">${formatFileSize(file.size)}</span>
+							</td>
+							<td class="px-6 py-4 bg-indigo-50/30">
 								<div class="flex items-start gap-2">
 									<svg class="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -629,7 +636,7 @@
 						)}</span>
 								</div>
 							</td>
-							<td class="px-6 py-4 hidden lg:table-cell bg-purple-50/30">
+							<td class="px-6 py-4 bg-purple-50/30">
 								<div class="flex items-center gap-2">
 									<svg class="w-4 h-4 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.98 1.98 0 013 12V7a4 4 0 014-4z" />
@@ -651,7 +658,7 @@
 									</div>
 								</div>
 							</td>
-							<td class="px-6 py-4 hidden xl:table-cell bg-emerald-50/30">
+							<td class="px-6 py-4 bg-emerald-50/30">
 								<div class="flex items-center gap-2">
 									<svg class="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -659,7 +666,7 @@
 									<span class="text-sm font-semibold text-slate-700">${formatShortDate(file.uploadedAt)}</span>
 								</div>
 							</td>
-							<td class="px-6 py-4 hidden xl:table-cell bg-amber-50/30" data-expiration-cell>
+							<td class="px-6 py-4 bg-amber-50/30" data-expiration-cell>
 								<div class="flex items-center gap-2">
 									<svg class="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -675,11 +682,11 @@
 											: `<a href="${file.downloadUrl}?filename=${encodeURIComponent(
 													file.filename
 											  )}" target="_blank" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-xs font-medium rounded-lg hover:from-indigo-600 hover:to-purple-700 transition shadow-sm">
-													<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-													</svg>
-													Download
-												</a>`
+											<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+											</svg>
+											Download
+										</a>`
 									}
 									<button data-action="copy-id" data-file-id="${escapeHtml(
 										file.fileId
